@@ -1,0 +1,43 @@
+{
+  "name": "@crudy/pgmorbac",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Crudy pgmorbac — Multi-OrBAC permission helpers for Fastify and PostgreSQL",
+  "exports": {
+    ".":             { "types": "./dist/index.d.ts",       "default": "./dist/index.js" },
+    "./permissions": { "types": "./dist/permissions.d.ts", "default": "./dist/permissions.js" },
+    "./proxy":       { "types": "./dist/proxy.d.ts",       "default": "./dist/proxy.js" },
+    "./plugin":      { "types": "./dist/plugin.d.ts",      "default": "./dist/plugin.js" },
+    "./schemas":     { "types": "./dist/schemas.d.ts",     "default": "./dist/schemas.js" },
+    "./api":         { "types": "./dist/api.d.ts",         "default": "./dist/api.js" }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist", "package.json"],
+  "scripts": {
+    "build": "tsc",
+    "prepack": "npm run build"
+  },
+  "publishConfig": {
+    "registry": "http://localhost:4873",
+    "access": "public"
+  },
+  "dependencies": {
+    "bcryptjs": "^2"
+  },
+  "peerDependencies": {
+    "fastify": ">=5",
+    "pg": ">=8"
+  },
+  "peerDependenciesMeta": {
+    "fastify": { "optional": true },
+    "pg": { "optional": true }
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2",
+    "@types/pg": "^8",
+    "fastify": "^5",
+    "pg": "^8",
+    "typescript": "^5"
+  }
+}
