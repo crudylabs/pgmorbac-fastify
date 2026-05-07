@@ -80,7 +80,7 @@ export function createProxyRegistry(db: Pool, postgrestUrl: string): ProxyRegist
             pick('prefer',       'Prefer');
             pick('accept',       'Accept');
 
-            if (req.method === 'POST' || req.method === 'PATCH' || req.method === 'DELETE') {
+            if (req.method === 'POST' || req.method === 'PATCH') {
                 const existing = headers['Prefer'];
                 if (!existing || !existing.includes('return=')) {
                     headers['Prefer'] = existing
