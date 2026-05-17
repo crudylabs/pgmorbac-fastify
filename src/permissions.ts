@@ -49,6 +49,13 @@ export async function getAccountType(
     return rows[0]?.account_type ?? null;
 }
 
+export type ApiKeyScope = 'inherit' | Array<{ activity: string; view: string }>;
+
+function scopeAllows(scope: ApiKeyScope | undefined, activity: string, target: string): boolean {
+    if (!scope || scope === 'inherit') return true;
+    return scope.some((p) => p.activity === activity && p.view === target);
+}
+
 export async function hasPermission(
     db: Pool,
     req: FastifyRequest,
@@ -60,6 +67,11 @@ export async function hasPermission(
     const user = getUser(req);
     if (!user) {
         reply.code(401).send({ error: 'Authentication required' });
+        return false;
+    }
+    const apiKeyScope = ((req as unknown) as Record<string, unknown>).apiKeyScope as ApiKeyScope | undefined;
+    if (!scopeAllows(apiKeyScope, activity, target)) {
+        reply.code(403).send({ error: 'Insufficient permissions' });
         return false;
     }
     const { rows } = await db.query<{ allowed: boolean }>(
