@@ -41,9 +41,10 @@ export const userResponse = {
         id:           { type: 'string', format: 'uuid' },
         email:        { type: 'string', format: 'email' },
         name:         { type: 'string' },
-        account_type: { type: 'string', enum: ['user', 'system', 'service'] },
-        is_active:    { type: 'boolean' },
-        created_at:   { type: 'string', format: 'date-time' },
+        account_type:    { type: 'string', enum: ['user', 'system', 'service'] },
+        is_active:       { type: 'boolean' },
+        needs_placement: { type: 'boolean' },
+        created_at:      { type: 'string', format: 'date-time' },
         roles: {
             type: 'array',
             items: {

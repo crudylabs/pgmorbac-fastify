@@ -14,15 +14,24 @@ export type CheckLimitFn = (
     params?: unknown[],
 ) => Promise<boolean>;
 
+export interface OrgEvent {
+    action: 'created' | 'updated' | 'deleted';
+    org: { id: string; name?: string; parent_id?: string | null; metadata?: Record<string, unknown>; reparented?: boolean };
+    actorId: string | null;
+}
+
+export type OrgEventSink = (event: OrgEvent) => void;
+
 export interface MgmtPluginOptions {
     db: Pool;
     checkLimit?: CheckLimitFn;
+    emitOrgEvent?: OrgEventSink;
 }
 
 export function createMgmtRoutes(opts: MgmtPluginOptions) {
-    const { db, checkLimit } = opts;
+    const { db, checkLimit, emitOrgEvent } = opts;
     return async function mgmtRoutes(app: FastifyInstance) {
-        await app.register(createOrgRoutes(db, checkLimit));
+        await app.register(createOrgRoutes(db, checkLimit, emitOrgEvent));
         await app.register(createRoleRoutes(db, checkLimit));
         await app.register(createRuleRoutes(db));
         await app.register(createUserRoutes(db, checkLimit));

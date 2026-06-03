@@ -1,12 +1,14 @@
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
-import type { CheckLimitFn } from '../plugin.js';
+import type { CheckLimitFn, OrgEventSink } from '../plugin.js';
 import {
     getUser, getOrgScope, orgScopeExpr, hasPermission, SYSTEM_ORG_ID,
 } from '../permissions.js';
 import { orgResponse, notFound, forbidden, unauthorized, badRequest } from '../schemas.js';
 
-export function createOrgRoutes(db: Pool, checkLimit?: CheckLimitFn) {
+interface OrgRow { id: string; name: string; parent_id: string | null; metadata?: Record<string, unknown> }
+
+export function createOrgRoutes(db: Pool, checkLimit?: CheckLimitFn, emitOrgEvent?: OrgEventSink) {
     return async function orgRoutes(app: FastifyInstance) {
         app.get('/orgs', {
             schema: {
@@ -102,10 +104,11 @@ export function createOrgRoutes(db: Pool, checkLimit?: CheckLimitFn) {
                 if (!ok) return reply;
             }
 
-            const { rows } = await db.query(
+            const { rows } = await db.query<OrgRow>(
                 'INSERT INTO morbac.orgs (name, parent_id) VALUES ($1, $2) RETURNING id, name, parent_id, metadata',
                 [name, parent_id ?? null],
             );
+            emitOrgEvent?.({ action: 'created', org: rows[0], actorId: user.id });
             return reply.code(201).send(rows[0]);
         });
 
@@ -137,16 +140,21 @@ export function createOrgRoutes(db: Pool, checkLimit?: CheckLimitFn) {
             if (!await hasPermission(db, req, reply, id, 'update', 'orgs')) return reply;
 
             const body = req.body as { name?: string; parent_id?: string | null };
-            const { rows } = await db.query(
-                `UPDATE morbac.orgs
+            const { rows } = await db.query<OrgRow & { reparented: boolean }>(
+                `WITH prev AS (SELECT parent_id AS old_parent FROM morbac.orgs WHERE id = $4)
+                 UPDATE morbac.orgs o
                  SET name      = CASE WHEN $1::text IS NOT NULL THEN $1 ELSE name END,
                      parent_id = CASE WHEN $2 THEN NULL WHEN $3::text IS NOT NULL THEN $3::uuid ELSE parent_id END
-                 WHERE id = $4
-                 RETURNING id, name, parent_id, metadata`,
+                 FROM prev
+                 WHERE o.id = $4
+                 RETURNING o.id, o.name, o.parent_id, o.metadata,
+                           (o.parent_id IS DISTINCT FROM prev.old_parent) AS reparented`,
                 [body.name ?? null, body.parent_id === null, body.parent_id ?? null, id],
             );
             if (!rows[0]) return reply.code(404).send({ error: 'Not found' });
-            return rows[0];
+            const { reparented, ...org } = rows[0];
+            emitOrgEvent?.({ action: 'updated', org: { ...org, reparented }, actorId: user.id });
+            return org;
         });
 
         app.delete('/orgs/:id', {
@@ -169,7 +177,11 @@ export function createOrgRoutes(db: Pool, checkLimit?: CheckLimitFn) {
             if (id === SYSTEM_ORG_ID) return reply.code(403).send({ error: 'System entities are immutable' });
             if (!await hasPermission(db, req, reply, id, 'delete', 'orgs')) return reply;
 
-            await db.query('DELETE FROM morbac.orgs WHERE id = $1', [id]);
+            const { rows } = await db.query<OrgRow>(
+                'DELETE FROM morbac.orgs WHERE id = $1 RETURNING id, name, parent_id, metadata',
+                [id],
+            );
+            if (rows[0]) emitOrgEvent?.({ action: 'deleted', org: rows[0], actorId: user.id });
             return reply.code(204).send();
         });
     };

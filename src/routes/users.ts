@@ -30,23 +30,27 @@ export function createUserRoutes(db: Pool, checkLimit?: CheckLimitFn) {
             if (!await hasPermission(db, req, reply, orgIds[0] ?? null, 'read', 'users')) return reply;
 
             const checkOrg = orgIds[0] ?? null;
-            const [sysRes, svcRes] = await Promise.all([
+            const [sysRes, svcRes, globalRes] = await Promise.all([
                 db.query<{ allowed: boolean }>('SELECT morbac.is_allowed($1::UUID, $2::UUID, $3, $4) AS allowed',
                     [user.id, checkOrg, 'read', 'system_users']),
                 db.query<{ allowed: boolean }>('SELECT morbac.is_allowed($1::UUID, $2::UUID, $3, $4) AS allowed',
                     [user.id, checkOrg, 'read', 'service_users']),
+                db.query<{ allowed: boolean }>('SELECT morbac.is_allowed($1::UUID, NULL, $2, $3) AS allowed',
+                    [user.id, 'read', 'users']),
             ]);
-            const canSeeSystem  = sysRes.rows[0]?.allowed  ?? false;
-            const canSeeService = svcRes.rows[0]?.allowed ?? false;
+            const canSeeSystem    = sysRes.rows[0]?.allowed    ?? false;
+            const canSeeService   = svcRes.rows[0]?.allowed   ?? false;
+            const canReadGlobally = globalRes.rows[0]?.allowed ?? false;
 
             const { expr, params } = orgScopeExpr(orgIds, 'ur2.org_id');
             const isSystemScope = orgIds.includes(SYSTEM_ORG_ID);
+            const placement = canReadGlobally ? ' OR u.needs_placement' : '';
             const whereClause = expr && !isSystemScope
-                ? `WHERE u.id IN (SELECT ur2.user_id FROM morbac.user_roles ur2 WHERE ${expr})`
+                ? `WHERE (u.id IN (SELECT ur2.user_id FROM morbac.user_roles ur2 WHERE ${expr})${placement})`
                 : '';
             const { rows } = await db.query(
                 `SELECT
-                     u.id, u.email, u.name, u.account_type, u.is_active, u.created_at,
+                     u.id, u.email, u.name, u.account_type, u.is_active, u.needs_placement, u.created_at,
                      COALESCE(
                          json_agg(json_build_object(
                              'role_id',   ur.role_id,
@@ -79,7 +83,7 @@ export function createUserRoutes(db: Pool, checkLimit?: CheckLimitFn) {
                 security: [{ oauth2: [] }],
                 body: {
                     type: 'object',
-                    required: ['email', 'name', 'password'],
+                    required: ['email', 'name'],
                     properties: {
                         email:        { type: 'string', format: 'email', maxLength: 320 },
                         name:         { type: 'string', minLength: 1, maxLength: 255 },
@@ -103,7 +107,7 @@ export function createUserRoutes(db: Pool, checkLimit?: CheckLimitFn) {
             const orgId = orgIds[0] ?? null;
 
             const { email: rawEmail, name, password, account_type = 'user', is_active = true } = req.body as {
-                email: string; name: string; password: string;
+                email: string; name: string; password?: string;
                 account_type?: 'user' | 'service'; is_active?: boolean;
             };
             const email = rawEmail.trim().toLowerCase();
@@ -120,12 +124,12 @@ export function createUserRoutes(db: Pool, checkLimit?: CheckLimitFn) {
                 if (!ok) return reply;
             }
 
-            const hash = await bcrypt.hash(password, 12);
+            const hash = password ? await bcrypt.hash(password, 12) : null;
             try {
                 const { rows } = await db.query(
                     `INSERT INTO app.users (email, name, password_hash, account_type, is_active)
                      VALUES ($1, $2, $3, $4, $5)
-                     RETURNING id, email, name, account_type, is_active, created_at`,
+                     RETURNING id, email, name, account_type, is_active, needs_placement, created_at`,
                     [email, name, hash, account_type, is_active],
                 );
                 return reply.code(201).send({ ...rows[0], roles: [] });
@@ -181,7 +185,7 @@ export function createUserRoutes(db: Pool, checkLimit?: CheckLimitFn) {
                      is_active     = COALESCE($3, is_active),
                      password_hash = COALESCE($4, password_hash)
                  WHERE id = $5
-                 RETURNING id, email, name, account_type, is_active, created_at`,
+                 RETURNING id, email, name, account_type, is_active, needs_placement, created_at`,
                 [name ?? null, email ?? null, is_active ?? null, hash, id],
             );
             if (!rows[0]) return reply.code(404).send({ error: 'Not found' });
@@ -269,6 +273,7 @@ export function createUserRoutes(db: Pool, checkLimit?: CheckLimitFn) {
                 }
                 throw e;
             }
+            await db.query('UPDATE app.users SET needs_placement = FALSE WHERE id = $1 AND needs_placement', [user_id]);
             return reply.code(201).send({ user_id, role_id, org_id });
         });
 

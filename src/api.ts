@@ -106,6 +106,7 @@ export interface UserDetail {
     name: string;
     account_type: 'user' | 'system' | 'service';
     is_active: boolean;
+    needs_placement?: boolean;
     created_at: string;
     roles: { role_id: string; role_name: string; org_id: string; org_name: string }[];
 }
@@ -166,7 +167,7 @@ export interface MorbacApi {
     deleteGlobalRule(token: string, orgIds: string[], id: string): Promise<null>;
     getSystemPrincipals(token: string, orgIds: string[]): Promise<SystemPrincipal[]>;
     getUsers(token: string, orgIds: string[]): Promise<UserDetail[]>;
-    createUser(token: string, orgIds: string[], data: { email: string; name: string; password: string }): Promise<UserDetail>;
+    createUser(token: string, orgIds: string[], data: { email: string; name: string; password?: string }): Promise<UserDetail>;
     updateUser(token: string, orgIds: string[], id: string, data: { name?: string; email?: string; is_active?: boolean; password?: string }): Promise<UserDetail>;
     deleteUser(token: string, orgIds: string[], id: string): Promise<null>;
     assignRole(token: string, orgIds: string[], data: { user_id: string; role_id: string; org_id: string }): Promise<unknown>;
