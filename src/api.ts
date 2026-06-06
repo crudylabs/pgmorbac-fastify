@@ -135,6 +135,24 @@ export interface EffectivePermission {
     source: 'role' | 'direct' | 'global';
 }
 
+export interface Delegation {
+    id: string;
+    delegator_id: string;
+    delegatee_id: string;
+    delegator_name: string | null;
+    delegator_email: string | null;
+    delegatee_name: string | null;
+    delegatee_email: string | null;
+    role_id: string;
+    role_name: string;
+    org_id: string;
+    org_name: string;
+    valid_from: string;
+    valid_until: string;
+    revoked: boolean;
+    created_at: string;
+}
+
 export type ActivityViewBinding = { activity: string; view: string };
 
 export interface MorbacApi {
@@ -175,6 +193,9 @@ export interface MorbacApi {
     getActivityUsers(token: string, orgIds: string[], name: string): Promise<RuleUser[]>;
     getViewUsers(token: string, orgIds: string[], name: string): Promise<RuleUser[]>;
     getEffectivePermissions(token: string, orgIds: string[], userId: string): Promise<EffectivePermission[]>;
+    getDelegations(token: string, orgIds: string[]): Promise<Delegation[]>;
+    createDelegation(token: string, orgIds: string[], data: { delegator_id: string; delegatee_id: string; role_id: string; org_id: string; valid_from?: string; valid_until: string }): Promise<Delegation>;
+    revokeDelegation(token: string, orgIds: string[], id: string): Promise<null>;
 }
 
 export function createMorbacApi(apiUrl: string): MorbacApi {
@@ -263,5 +284,9 @@ export function createMorbacApi(apiUrl: string): MorbacApi {
         getActivityUsers:      (t, orgIds, name) => api('GET', `/activities/${encodeURIComponent(name)}/users`, t, orgIds) as Promise<RuleUser[]>,
         getViewUsers:          (t, orgIds, name) => api('GET', `/views/${encodeURIComponent(name)}/users`, t, orgIds) as Promise<RuleUser[]>,
         getEffectivePermissions: (t, orgIds, userId) => api('GET', `/users/${userId}/effective-permissions`, t, orgIds) as Promise<EffectivePermission[]>,
+
+        getDelegations:   (t, orgIds) => api('GET', '/delegations', t, orgIds) as Promise<Delegation[]>,
+        createDelegation: (t, orgIds, d) => api('POST', '/delegations', t, orgIds, d) as Promise<Delegation>,
+        revokeDelegation: (t, orgIds, id) => api('DELETE', `/delegations/${id}`, t, orgIds) as Promise<null>,
     };
 }

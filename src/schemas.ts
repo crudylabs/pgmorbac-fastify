@@ -108,6 +108,27 @@ export const globalRuleResponse = {
     },
 };
 
+export const delegationResponse = {
+    type: 'object',
+    properties: {
+        id:              { type: 'string', format: 'uuid' },
+        delegator_id:    { type: 'string', format: 'uuid' },
+        delegatee_id:    { type: 'string', format: 'uuid' },
+        delegator_name:  { type: 'string', nullable: true },
+        delegator_email: { type: 'string', nullable: true },
+        delegatee_name:  { type: 'string', nullable: true },
+        delegatee_email: { type: 'string', nullable: true },
+        role_id:         { type: 'string', format: 'uuid' },
+        role_name:       { type: 'string' },
+        org_id:          { type: 'string', format: 'uuid' },
+        org_name:        { type: 'string' },
+        valid_from:      { type: 'string', format: 'date-time' },
+        valid_until:     { type: 'string', format: 'date-time' },
+        revoked:         { type: 'boolean' },
+        created_at:      { type: 'string', format: 'date-time' },
+    },
+};
+
 export const notFound     = { description: 'Resource not found.' };
 export const forbidden    = { description: 'Insufficient permissions.' };
 export const unauthorized = { description: 'Missing or invalid token.' };

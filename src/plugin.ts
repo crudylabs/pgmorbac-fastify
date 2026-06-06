@@ -6,6 +6,7 @@ import { createRuleRoutes }     from './routes/rules.js';
 import { createUserRoutes }     from './routes/users.js';
 import { createGlobalRoutes }   from './routes/globals.js';
 import { createActivityRoutes } from './routes/activities.js';
+import { createDelegationRoutes } from './routes/delegations.js';
 
 export type CheckLimitFn = (
     reply: FastifyReply,
@@ -37,5 +38,6 @@ export function createMgmtRoutes(opts: MgmtPluginOptions) {
         await app.register(createUserRoutes(db, checkLimit));
         await app.register(createGlobalRoutes(db));
         await app.register(createActivityRoutes(db));
+        await app.register(createDelegationRoutes(db));
     };
 }

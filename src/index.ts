@@ -14,5 +14,6 @@ export type {
     UserDetail,
     RuleUser,
     EffectivePermission,
+    Delegation,
     ActivityViewBinding,
 } from './api.js';
