@@ -28,7 +28,8 @@ export function createGlobalRoutes(db: Pool) {
                         COALESCE(u.name, gr.user_id::TEXT) AS user_name,
                         u.email AS user_email,
                         gr.activity, gr.view, gr.modality, gr.priority,
-                        (sp.user_id IS NOT NULL) AS is_system_principal
+                        (sp.user_id IS NOT NULL) AS is_system_principal,
+                        (gr.user_id IS NULL AND gr.view = 'system_users' AND gr.modality = 'prohibition') AS is_system_managed
                  FROM morbac.global_rules gr
                  LEFT JOIN app.users u ON u.id = gr.user_id
                  LEFT JOIN morbac.system_principals sp ON sp.user_id = gr.user_id
@@ -86,7 +87,8 @@ export function createGlobalRoutes(db: Pool) {
                          (SELECT name  FROM app.users WHERE id = $1) AS user_name,
                          (SELECT email FROM app.users WHERE id = $1) AS user_email,
                          activity, view, modality, priority,
-                         FALSE AS is_system_principal`,
+                         FALSE AS is_system_principal,
+                         (user_id IS NULL AND view = 'system_users' AND modality = 'prohibition') AS is_system_managed`,
                     [user_id ?? null, activity ?? null, view ?? null, modality, priority ?? null],
                 );
                 return reply.code(201).send(rows[0]);
@@ -113,10 +115,14 @@ export function createGlobalRoutes(db: Pool) {
             if (!user) return reply.code(401).send({ error: 'Authentication required' });
 
             const { id } = req.params as { id: string };
-            const { rows: [gr] } = await db.query<{ user_id: string | null }>(
-                'SELECT user_id FROM morbac.global_rules WHERE id = $1', [id],
+            const { rows: [gr] } = await db.query<{ user_id: string | null; is_system_managed: boolean }>(
+                `SELECT user_id,
+                        (user_id IS NULL AND view = 'system_users' AND modality = 'prohibition') AS is_system_managed
+                 FROM morbac.global_rules WHERE id = $1`, [id],
             );
             if (!gr) return reply.code(404).send({ error: 'Not found' });
+
+            if (gr.is_system_managed) return reply.code(403).send({ error: 'System-managed rules are immutable' });
 
             if (gr.user_id) {
                 const { rows: [sp] } = await db.query(
@@ -129,69 +135,6 @@ export function createGlobalRoutes(db: Pool) {
 
             await db.query('DELETE FROM morbac.global_rules WHERE id = $1', [id]);
             return reply.code(204).send();
-        });
-
-        app.get('/system-principals', {
-            schema: {
-                tags: ['Management'],
-                summary: 'List system principals',
-                description: 'Read-only registry of system-level accounts with immutable global rules. Requires `read`/`rules` in the system org.',
-                security: [{ oauth2: [] }],
-                response: {
-                    200: {
-                        type: 'array',
-                        items: {
-                            type: 'object',
-                            properties: {
-                                user_id:      { type: 'string', format: 'uuid' },
-                                user_name:    { type: 'string' },
-                                user_email:   { type: 'string', nullable: true },
-                                description:  { type: 'string', nullable: true },
-                                global_rules: {
-                                    type: 'array',
-                                    items: {
-                                        type: 'object',
-                                        properties: {
-                                            id:       { type: 'string', format: 'uuid' },
-                                            activity: { type: 'string', nullable: true },
-                                            view:     { type: 'string', nullable: true },
-                                            modality: { type: 'string', enum: ['permission', 'prohibition'] },
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                    },
-                    401: unauthorized, 403: forbidden,
-                },
-            },
-        }, async (req, reply) => {
-            const user = getUser(req);
-            if (!user) return reply.code(401).send({ error: 'Authentication required' });
-
-            if (!await hasPermission(db, req, reply, SYSTEM_ORG_ID, 'read', 'rules')) return reply;
-
-            const { rows } = await db.query(
-                `SELECT sp.user_id,
-                        COALESCE(u.name, sp.user_id::TEXT) AS user_name,
-                        u.email AS user_email,
-                        sp.description,
-                        COALESCE(
-                            json_agg(json_build_object(
-                                'id',       gr.id,
-                                'activity', gr.activity,
-                                'view',     gr.view,
-                                'modality', gr.modality
-                            )) FILTER (WHERE gr.id IS NOT NULL),
-                            '[]'::json
-                        ) AS global_rules
-                 FROM morbac.system_principals sp
-                 LEFT JOIN app.users u ON u.id = sp.user_id
-                 LEFT JOIN morbac.global_rules gr ON gr.user_id = sp.user_id
-                 GROUP BY sp.user_id, u.name, u.email, sp.description
-                 ORDER BY u.name`,
-            );
-            return rows;
         });
     };
 }

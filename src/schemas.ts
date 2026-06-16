@@ -105,6 +105,7 @@ export const globalRuleResponse = {
         modality:            { type: 'string', enum: ['permission', 'prohibition'] },
         priority:            { type: 'integer', nullable: true },
         is_system_principal: { type: 'boolean' },
+        is_system_managed:   { type: 'boolean' },
     },
 };
 

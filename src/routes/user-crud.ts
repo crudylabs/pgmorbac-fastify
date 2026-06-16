@@ -6,6 +6,7 @@ import {
     getUser, getOrgScope, orgScopeExpr, hasPermission, getAccountType, viewForType, SYSTEM_ORG_ID,
 } from '../permissions.js';
 import { userResponse, notFound, forbidden, unauthorized, badRequest } from '../schemas.js';
+import { generatePassword } from '../password.js';
 
 export function createUserCrudRoutes(db: Pool, checkLimit?: CheckLimitFn) {
     return async function userCrudRoutes(app: FastifyInstance) {
@@ -46,7 +47,7 @@ export function createUserCrudRoutes(db: Pool, checkLimit?: CheckLimitFn) {
             const isSystemScope = orgIds.includes(SYSTEM_ORG_ID);
             const placement = canReadGlobally ? ' OR u.needs_placement' : '';
             const whereClause = expr && !isSystemScope
-                ? `WHERE (u.id IN (SELECT ur2.user_id FROM morbac.user_roles ur2 WHERE ${expr})${placement})`
+                ? `WHERE (u.id IN (SELECT ur2.user_id FROM morbac.user_roles ur2 WHERE ${expr})${placement} OR u.account_type IN ('system', 'service'))`
                 : '';
             const { rows } = await db.query(
                 `SELECT
@@ -79,7 +80,7 @@ export function createUserCrudRoutes(db: Pool, checkLimit?: CheckLimitFn) {
             schema: {
                 tags: ['Management'],
                 summary: 'Create a user',
-                description: 'Creates a user account. Requires `create`/`users` (or `create`/`service_users`) permission in the scoped org.',
+                description: 'Creates a user account. For `user` accounts a strong password is auto-generated and returned once as `generated_password`; the account must change it on first login. `service` accounts have no password (API-only). Requires `create`/`users` (or `create`/`service_users`) permission.',
                 security: [{ oauth2: [] }],
                 body: {
                     type: 'object',
@@ -87,13 +88,12 @@ export function createUserCrudRoutes(db: Pool, checkLimit?: CheckLimitFn) {
                     properties: {
                         email:        { type: 'string', format: 'email', maxLength: 320 },
                         name:         { type: 'string', minLength: 1, maxLength: 255 },
-                        password:     { type: 'string', minLength: 8, maxLength: 1024 },
                         account_type: { type: 'string', enum: ['user', 'service'], default: 'user' },
                         is_active:    { type: 'boolean', default: true },
                     },
                 },
                 response: {
-                    201: userResponse,
+                    201: { ...userResponse, properties: { ...userResponse.properties, generated_password: { type: 'string' } } },
                     400: badRequest, 401: unauthorized, 403: forbidden,
                     409: { description: 'Email already in use.' },
                 },
@@ -106,8 +106,8 @@ export function createUserCrudRoutes(db: Pool, checkLimit?: CheckLimitFn) {
             if (orgIds === null) return reply;
             const orgId = orgIds[0] ?? null;
 
-            const { email: rawEmail, name, password, account_type = 'user', is_active = true } = req.body as {
-                email: string; name: string; password?: string;
+            const { email: rawEmail, name, account_type = 'user', is_active = true } = req.body as {
+                email: string; name: string;
                 account_type?: 'user' | 'service'; is_active?: boolean;
             };
             const email = rawEmail.trim().toLowerCase();
@@ -124,15 +124,19 @@ export function createUserCrudRoutes(db: Pool, checkLimit?: CheckLimitFn) {
                 if (!ok) return reply;
             }
 
-            const hash = password ? await bcrypt.hash(password, 12) : null;
+            // Passwords are never admin-supplied. User accounts get a strong generated
+            // password (returned once) and must change it on first login. Service
+            // accounts are API-only and have no password.
+            const generated = account_type === 'user' ? generatePassword() : null;
+            const hash = generated ? await bcrypt.hash(generated, 12) : null;
             try {
                 const { rows } = await db.query(
-                    `INSERT INTO app.users (email, name, password_hash, account_type, is_active)
-                     VALUES ($1, $2, $3, $4, $5)
+                    `INSERT INTO app.users (email, name, password_hash, account_type, is_active, must_change_password)
+                     VALUES ($1, $2, $3, $4, $5, $6)
                      RETURNING id, email, name, account_type, is_active, needs_placement, created_at`,
-                    [email, name, hash, account_type, is_active],
+                    [email, name, hash, account_type, is_active, generated !== null],
                 );
-                return reply.code(201).send({ ...rows[0], roles: [] });
+                return reply.code(201).send({ ...rows[0], roles: [], ...(generated && { generated_password: generated }) });
             } catch (e: unknown) {
                 if ((e as { code?: string }).code === '23505') return reply.code(409).send({ error: 'Email already in use' });
                 throw e;
@@ -143,20 +147,20 @@ export function createUserCrudRoutes(db: Pool, checkLimit?: CheckLimitFn) {
             schema: {
                 tags: ['Management'],
                 summary: 'Update a user',
-                description: "Updates a user's name, email, password, or active status. Requires `update`/`users` (or `update`/`service_users`) permission.",
+                description: "Updates a user's name, email, or active status. Passwords are never admin-supplied: set `reset_password: true` to generate a new strong password (returned once as `generated_password`) which the user must change on next login. Requires `update`/`users` (or `update`/`service_users`) permission.",
                 security: [{ oauth2: [] }],
                 params: { type: 'object', properties: { id: { type: 'string', format: 'uuid' } } },
                 body: {
                     type: 'object',
                     properties: {
-                        name:      { type: 'string', minLength: 1, maxLength: 255 },
-                        email:     { type: 'string', format: 'email', maxLength: 320 },
-                        password:  { type: 'string', minLength: 8, maxLength: 1024 },
-                        is_active: { type: 'boolean' },
+                        name:           { type: 'string', minLength: 1, maxLength: 255 },
+                        email:          { type: 'string', format: 'email', maxLength: 320 },
+                        is_active:      { type: 'boolean' },
+                        reset_password: { type: 'boolean' },
                     },
                 },
                 response: {
-                    200: userResponse,
+                    200: { ...userResponse, properties: { ...userResponse.properties, generated_password: { type: 'string' } } },
                     400: badRequest, 401: unauthorized, 403: forbidden, 404: notFound,
                 },
             },
@@ -174,22 +178,25 @@ export function createUserCrudRoutes(db: Pool, checkLimit?: CheckLimitFn) {
             if (type === 'system') return reply.code(403).send({ error: 'System entities are immutable' });
             if (!await hasPermission(db, req, reply, orgId, 'update', viewForType(type))) return reply;
 
-            const { name, email, password, is_active } = req.body as {
-                name?: string; email?: string; password?: string; is_active?: boolean;
+            const { name, email, is_active, reset_password } = req.body as {
+                name?: string; email?: string; is_active?: boolean; reset_password?: boolean;
             };
-            const hash = password ? await bcrypt.hash(password, 12) : null;
+            // Only 'user' accounts have passwords. Service accounts authenticate via API keys.
+            const generated = reset_password && type === 'user' ? generatePassword() : null;
+            const hash = generated ? await bcrypt.hash(generated, 12) : null;
             const { rows } = await db.query(
                 `UPDATE app.users
                  SET name          = COALESCE($1, name),
                      email         = COALESCE($2, email),
                      is_active     = COALESCE($3, is_active),
-                     password_hash = COALESCE($4, password_hash)
+                     password_hash = COALESCE($4, password_hash),
+                     must_change_password = CASE WHEN $4 IS NOT NULL THEN TRUE ELSE must_change_password END
                  WHERE id = $5
                  RETURNING id, email, name, account_type, is_active, needs_placement, created_at`,
                 [name ?? null, email ?? null, is_active ?? null, hash, id],
             );
             if (!rows[0]) return reply.code(404).send({ error: 'Not found' });
-            return rows[0];
+            return reply.send({ ...rows[0], ...(generated && { generated_password: generated }) });
         });
 
         app.delete('/users/:id', {

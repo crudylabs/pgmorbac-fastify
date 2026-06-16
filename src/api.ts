@@ -80,6 +80,7 @@ export interface GlobalRule {
     modality: 'permission' | 'prohibition';
     priority: number | null;
     is_system_principal: boolean;
+    is_system_managed: boolean;
 }
 
 export interface RoleHierarchy {
@@ -91,15 +92,6 @@ export interface RoleHierarchy {
     org_name: string;
 }
 
-export interface SystemPrincipal {
-    user_id: string;
-    user_name: string;
-    user_email: string | null;
-    description: string | null;
-    created_at: string;
-    global_rules: { id: string; activity: string | null; view: string | null; modality: 'permission' | 'prohibition' }[];
-}
-
 export interface UserDetail {
     id: string;
     email: string;
@@ -109,6 +101,22 @@ export interface UserDetail {
     needs_placement?: boolean;
     created_at: string;
     roles: { role_id: string; role_name: string; org_id: string; org_name: string }[];
+    // Present only on the create/reset response for 'user' accounts: the one-time
+    // generated password the account must change on first login.
+    generated_password?: string;
+}
+
+export interface ServiceAccountKey {
+    id: string;
+    name: string;
+    description: string | null;
+    key_prefix: string;
+    readonly: boolean;
+    permission_scope: unknown;
+    expires_at: string | null;
+    last_used_at: string | null;
+    created_at: string;
+    key?: string;
 }
 
 export interface RuleUser {
@@ -183,11 +191,13 @@ export interface MorbacApi {
     getGlobalRules(token: string, orgIds: string[]): Promise<GlobalRule[]>;
     createGlobalRule(token: string, orgIds: string[], data: { user_id?: string | null; activity?: string | null; view?: string | null; modality: 'permission' | 'prohibition'; priority?: number }): Promise<GlobalRule>;
     deleteGlobalRule(token: string, orgIds: string[], id: string): Promise<null>;
-    getSystemPrincipals(token: string, orgIds: string[]): Promise<SystemPrincipal[]>;
     getUsers(token: string, orgIds: string[]): Promise<UserDetail[]>;
-    createUser(token: string, orgIds: string[], data: { email: string; name: string; password?: string }): Promise<UserDetail>;
-    updateUser(token: string, orgIds: string[], id: string, data: { name?: string; email?: string; is_active?: boolean; password?: string }): Promise<UserDetail>;
+    createUser(token: string, orgIds: string[], data: { email: string; name: string; password?: string; account_type?: 'user' | 'service' }): Promise<UserDetail>;
+    updateUser(token: string, orgIds: string[], id: string, data: { name?: string; email?: string; is_active?: boolean; reset_password?: boolean }): Promise<UserDetail>;
     deleteUser(token: string, orgIds: string[], id: string): Promise<null>;
+    getUserKeys(token: string, orgIds: string[], userId: string): Promise<ServiceAccountKey[]>;
+    createUserKey(token: string, orgIds: string[], userId: string, data: { name: string; description?: string; readonly?: boolean; expires_at?: string | null }): Promise<ServiceAccountKey>;
+    deleteUserKey(token: string, orgIds: string[], userId: string, keyId: string): Promise<null>;
     assignRole(token: string, orgIds: string[], data: { user_id: string; role_id: string; org_id: string }): Promise<unknown>;
     removeRole(token: string, orgIds: string[], data: { user_id: string; role_id: string; org_id: string }): Promise<unknown>;
     getActivityUsers(token: string, orgIds: string[], name: string): Promise<RuleUser[]>;
@@ -271,12 +281,14 @@ export function createMorbacApi(apiUrl: string): MorbacApi {
         createGlobalRule:  (t, orgIds, d) => api('POST', '/global-rules', t, orgIds, d) as Promise<GlobalRule>,
         deleteGlobalRule:  (t, orgIds, id) => api('DELETE', `/global-rules/${id}`, t, orgIds) as Promise<null>,
 
-        getSystemPrincipals: (t, orgIds) => api('GET', '/system-principals', t, orgIds) as Promise<SystemPrincipal[]>,
-
         getUsers:   (t, orgIds) => api('GET', '/users', t, orgIds) as Promise<UserDetail[]>,
         createUser: (t, orgIds, d) => api('POST', '/users', t, orgIds, d) as Promise<UserDetail>,
         updateUser: (t, orgIds, id, d) => api('PATCH', `/users/${id}`, t, orgIds, d) as Promise<UserDetail>,
         deleteUser: (t, orgIds, id) => api('DELETE', `/users/${id}`, t, orgIds) as Promise<null>,
+
+        getUserKeys:   (t, orgIds, userId) => api('GET', `/users/${userId}/keys`, t, orgIds) as Promise<ServiceAccountKey[]>,
+        createUserKey: (t, orgIds, userId, d) => api('POST', `/users/${userId}/keys`, t, orgIds, d) as Promise<ServiceAccountKey>,
+        deleteUserKey: (t, orgIds, userId, keyId) => api('DELETE', `/users/${userId}/keys/${keyId}`, t, orgIds) as Promise<null>,
 
         assignRole: (t, orgIds, d) => api('POST', `/users/${d.user_id}/roles`, t, orgIds, { role_id: d.role_id, org_id: d.org_id }),
         removeRole: (t, orgIds, d) => api('DELETE', `/users/${d.user_id}/roles`, t, orgIds, { role_id: d.role_id, org_id: d.org_id }),
