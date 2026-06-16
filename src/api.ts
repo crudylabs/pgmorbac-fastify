@@ -112,7 +112,7 @@ export interface ServiceAccountKey {
     description: string | null;
     key_prefix: string;
     readonly: boolean;
-    permission_scope: unknown;
+    permission_scope?: 'inherit' | Array<{ activity: string; view: string }>;
     expires_at: string | null;
     last_used_at: string | null;
     created_at: string;
@@ -196,7 +196,8 @@ export interface MorbacApi {
     updateUser(token: string, orgIds: string[], id: string, data: { name?: string; email?: string; is_active?: boolean; reset_password?: boolean }): Promise<UserDetail>;
     deleteUser(token: string, orgIds: string[], id: string): Promise<null>;
     getUserKeys(token: string, orgIds: string[], userId: string): Promise<ServiceAccountKey[]>;
-    createUserKey(token: string, orgIds: string[], userId: string, data: { name: string; description?: string; readonly?: boolean; expires_at?: string | null }): Promise<ServiceAccountKey>;
+    getUserPermissionOptions(token: string, orgIds: string[], userId: string): Promise<Array<{ activity: string; view: string }>>;
+    createUserKey(token: string, orgIds: string[], userId: string, data: { name: string; description?: string; readonly?: boolean; expires_at?: string | null; permission_scope?: 'inherit' | Array<{ activity: string; view: string }> }): Promise<ServiceAccountKey>;
     deleteUserKey(token: string, orgIds: string[], userId: string, keyId: string): Promise<null>;
     assignRole(token: string, orgIds: string[], data: { user_id: string; role_id: string; org_id: string }): Promise<unknown>;
     removeRole(token: string, orgIds: string[], data: { user_id: string; role_id: string; org_id: string }): Promise<unknown>;
@@ -287,6 +288,7 @@ export function createMorbacApi(apiUrl: string): MorbacApi {
         deleteUser: (t, orgIds, id) => api('DELETE', `/users/${id}`, t, orgIds) as Promise<null>,
 
         getUserKeys:   (t, orgIds, userId) => api('GET', `/users/${userId}/keys`, t, orgIds) as Promise<ServiceAccountKey[]>,
+        getUserPermissionOptions: (t, orgIds, userId) => api('GET', `/users/${userId}/permission-options`, t, orgIds) as Promise<Array<{ activity: string; view: string }>>,
         createUserKey: (t, orgIds, userId, d) => api('POST', `/users/${userId}/keys`, t, orgIds, d) as Promise<ServiceAccountKey>,
         deleteUserKey: (t, orgIds, userId, keyId) => api('DELETE', `/users/${userId}/keys/${keyId}`, t, orgIds) as Promise<null>,
 

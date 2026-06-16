@@ -28,6 +28,33 @@ const keyResponse = {
 
 type Scope = 'inherit' | Array<{ activity: string; view: string }>;
 
+// Distinct (activity, view) pairs a user/service account currently holds. Used
+// both to populate the scope picker and to cap a key's scope server-side, so the
+// two can never diverge. Mirrors GET /me/permissions for the target account.
+const HELD_PERMS_SQL = `
+    SELECT DISTINCT activity, view FROM (
+        SELECT activity, view FROM morbac.user_rules
+          WHERE user_id = $1 AND modality = 'permission' AND activity IS NOT NULL AND view IS NOT NULL
+        UNION
+        SELECT activity, view FROM morbac.global_rules
+          WHERE (user_id = $1 OR user_id IS NULL) AND modality = 'permission' AND activity IS NOT NULL AND view IS NOT NULL
+        UNION
+        SELECT r.activity, r.view FROM morbac.rules r
+          JOIN morbac.user_roles ur ON ur.role_id = r.role_id
+          WHERE ur.user_id = $1 AND r.modality = 'permission' AND r.is_active = TRUE
+        UNION
+        SELECT a.name, v.name FROM morbac.activities a CROSS JOIN morbac.views v
+          WHERE EXISTS (
+              SELECT 1 FROM morbac.global_rules gr
+              WHERE gr.user_id = $1 AND gr.modality = 'permission' AND gr.activity IS NULL AND gr.view IS NULL
+          )
+    ) t`;
+
+async function heldPerms(db: Pool, userId: string): Promise<Array<{ activity: string; view: string }>> {
+    const { rows } = await db.query<{ activity: string; view: string }>(HELD_PERMS_SQL, [userId]);
+    return rows;
+}
+
 // API keys are only manageable for service accounts. Minting a key for a human
 // ('user') or 'system' account would be impersonation, so those are treated as
 // non-existent here (404). Keys inherit the service account's own permissions.
@@ -63,6 +90,30 @@ export function createUserKeyRoutes(db: Pool) {
                 [id],
             );
             return rows;
+        });
+
+        app.get('/users/:id/permission-options', {
+            schema: {
+                tags: ['Management'],
+                summary: 'List a service account delegatable permissions',
+                description: 'Distinct (activity, view) pairs the service account holds, for restricting an API key scope. Requires `read`/`service_users`.',
+                security: [{ oauth2: [] }],
+                params: { type: 'object', properties: { id: { type: 'string', format: 'uuid' } } },
+                response: {
+                    200: { type: 'array', items: { type: 'object', properties: { activity: { type: 'string' }, view: { type: 'string' } } } },
+                    401: unauthorized, 403: forbidden, 404: notFound,
+                },
+            },
+        }, async (req, reply) => {
+            const user = getUser(req);
+            if (!user) return reply.code(401).send({ error: 'Authentication required' });
+            const orgIds = getOrgScope(req, reply, false);
+            if (orgIds === null) return reply;
+            const { id } = req.params as { id: string };
+            if (!await ensureService(id, reply)) return reply;
+            if (!await hasPermission(db, req, reply, orgIds[0] ?? null, 'read', 'service_users')) return reply;
+
+            return heldPerms(db, id);
         });
 
         app.post('/users/:id/keys', {
@@ -114,26 +165,7 @@ export function createUserKeyRoutes(db: Pool) {
                         return reply.code(400).send({ error: 'permission_scope entries must be {activity, view} strings' });
                     }
                 }
-                const { rows: held } = await db.query<{ activity: string; view: string }>(
-                    `SELECT DISTINCT activity, view FROM (
-                        SELECT activity, view FROM morbac.user_rules
-                          WHERE user_id = $1 AND modality = 'permission' AND activity IS NOT NULL AND view IS NOT NULL
-                        UNION
-                        SELECT activity, view FROM morbac.global_rules
-                          WHERE (user_id = $1 OR user_id IS NULL) AND modality = 'permission' AND activity IS NOT NULL AND view IS NOT NULL
-                        UNION
-                        SELECT r.activity, r.view FROM morbac.rules r
-                          JOIN morbac.user_roles ur ON ur.role_id = r.role_id
-                          WHERE ur.user_id = $1 AND r.modality = 'permission' AND r.is_active = TRUE
-                        UNION
-                        SELECT a.name, v.name FROM morbac.activities a CROSS JOIN morbac.views v
-                          WHERE EXISTS (
-                              SELECT 1 FROM morbac.global_rules gr
-                              WHERE gr.user_id = $1 AND gr.modality = 'permission' AND gr.activity IS NULL AND gr.view IS NULL
-                          )
-                    ) t`,
-                    [id],
-                );
+                const held = await heldPerms(db, id);
                 const heldSet = new Set(held.map((p) => `${p.activity} ${p.view}`));
                 for (const pair of scope) {
                     if (!heldSet.has(`${pair.activity} ${pair.view}`)) {
