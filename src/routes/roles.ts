@@ -1,12 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
-import type { CheckLimitFn } from '../plugin.js';
+import type { CheckLimitFn, RoleEventSink } from '../plugin.js';
 import {
     getUser, getOrgScope, orgScopeExpr, hasPermission, SYSTEM_ORG_ID,
 } from '../permissions.js';
 import { roleResponse, notFound, forbidden, unauthorized, badRequest } from '../schemas.js';
 
-export function createRoleRoutes(db: Pool, checkLimit?: CheckLimitFn) {
+export function createRoleRoutes(db: Pool, checkLimit?: CheckLimitFn, emitRoleEvent?: RoleEventSink) {
     return async function roleRoutes(app: FastifyInstance) {
         app.get('/roles', {
             schema: {
@@ -80,6 +80,7 @@ export function createRoleRoutes(db: Pool, checkLimit?: CheckLimitFn) {
                 [org_id, name, description ?? null],
             );
             const org = await db.query('SELECT name FROM morbac.orgs WHERE id = $1', [org_id]);
+            emitRoleEvent?.({ action: 'created', role: rows[0], actorId: user.id });
             return reply.code(201).send({ ...rows[0], org_name: org.rows[0]?.name });
         });
 
@@ -125,6 +126,7 @@ export function createRoleRoutes(db: Pool, checkLimit?: CheckLimitFn) {
                 [name ?? null, description ?? null, id],
             );
             if (!rows[0]) return reply.code(404).send({ error: 'Not found' });
+            emitRoleEvent?.({ action: 'updated', role: rows[0], actorId: user.id });
             return rows[0];
         });
 
@@ -153,6 +155,7 @@ export function createRoleRoutes(db: Pool, checkLimit?: CheckLimitFn) {
             if (!await hasPermission(db, req, reply, roleOrg.rows[0].org_id, 'delete', 'roles')) return reply;
 
             await db.query('DELETE FROM morbac.roles WHERE id = $1', [id]);
+            emitRoleEvent?.({ action: 'deleted', role: { id, org_id: roleOrg.rows[0].org_id }, actorId: user.id });
             return reply.code(204).send();
         });
 

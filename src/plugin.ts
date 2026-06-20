@@ -23,17 +23,26 @@ export interface OrgEvent {
 
 export type OrgEventSink = (event: OrgEvent) => void;
 
+export interface RoleEvent {
+    action: 'created' | 'updated' | 'deleted';
+    role: { id: string; org_id?: string; name?: string; description?: string | null };
+    actorId: string | null;
+}
+
+export type RoleEventSink = (event: RoleEvent) => void;
+
 export interface MgmtPluginOptions {
     db: Pool;
     checkLimit?: CheckLimitFn;
     emitOrgEvent?: OrgEventSink;
+    emitRoleEvent?: RoleEventSink;
 }
 
 export function createMgmtRoutes(opts: MgmtPluginOptions) {
-    const { db, checkLimit, emitOrgEvent } = opts;
+    const { db, checkLimit, emitOrgEvent, emitRoleEvent } = opts;
     return async function mgmtRoutes(app: FastifyInstance) {
         await app.register(createOrgRoutes(db, checkLimit, emitOrgEvent));
-        await app.register(createRoleRoutes(db, checkLimit));
+        await app.register(createRoleRoutes(db, checkLimit, emitRoleEvent));
         await app.register(createRuleRoutes(db));
         await app.register(createUserRoutes(db, checkLimit));
         await app.register(createGlobalRoutes(db));
