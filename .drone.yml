@@ -1,0 +1,56 @@
+# Per-repo Drone pipeline template for an extracted @crudy/* package or module (RFC 0006).
+# Copy this to .drone.yml in the standalone repo. It consumes dependencies from Verdaccio and
+# publishes the package on a tag. Set the `verdaccio_url` and `npm_token` Drone secrets.
+---
+kind: pipeline
+type: docker
+name: default
+
+trigger:
+  event:
+    - push
+    - pull_request
+    - tag
+
+steps:
+  - name: install
+    image: node:24
+    environment:
+      VERDACCIO:
+        from_secret: verdaccio_url
+    commands:
+      - npm ci --registry "$VERDACCIO"
+
+  - name: lint
+    image: node:24
+    commands:
+      - npm run --if-present lint -- --max-warnings=0
+
+  - name: typecheck
+    image: node:24
+    commands:
+      - npx tsc --noEmit
+
+  - name: test
+    image: node:24
+    commands:
+      - npm test --if-present
+
+  - name: build
+    image: node:24
+    commands:
+      - npm run --if-present build
+
+  - name: publish
+    image: node:24
+    environment:
+      VERDACCIO:
+        from_secret: verdaccio_url
+      NPM_TOKEN:
+        from_secret: npm_token
+    commands:
+      - echo "//${VERDACCIO#*://}:_authToken=$NPM_TOKEN" > .npmrc
+      - npm publish --registry "$VERDACCIO"
+    when:
+      event:
+        - tag
