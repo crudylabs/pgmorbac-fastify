@@ -2,7 +2,28 @@
   "name": "@crudy/pgmorbac",
   "version": "0.1.0",
   "type": "module",
-  "description": "Crudy pgmorbac — Multi-OrBAC permission helpers for Fastify and PostgreSQL",
+  "description": "Crudy pgmorbac - Multi-OrBAC permission helpers for Fastify and PostgreSQL",
+  "license": "Apache-2.0",
+  "keywords": [
+    "morbac",
+    "orbac",
+    "rbac",
+    "authorization",
+    "access-control",
+    "postgresql",
+    "fastify",
+    "rls",
+    "multi-tenant"
+  ],
+  "author": "Marc Villain",
+  "homepage": "https://pgmorbac.villains.fr",
+  "repository": {
+    "type": "git",
+    "url": "https://git.villains.fr/crudy/pgmorbac-node.git"
+  },
+  "bugs": {
+    "url": "https://git.villains.fr/crudy/pgmorbac-node/issues"
+  },
   "exports": {
     ".":             { "types": "./dist/index.d.ts",       "source": "./src/index.ts",       "default": "./dist/index.js" },
     "./permissions": { "types": "./dist/permissions.d.ts", "source": "./src/permissions.ts", "default": "./dist/permissions.js" },
@@ -13,7 +34,7 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist", "package.json"],
+  "files": ["dist", "package.json", "README.md", "CHANGELOG.md", "LICENSE", "NOTICE"],
   "scripts": {
     "build": "tsc",
     "prepack": "npm run build"
