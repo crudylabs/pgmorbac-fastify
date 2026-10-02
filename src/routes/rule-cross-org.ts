@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
-import { getUser, getOrgScope, orgScopeExpr, hasPermission, SYSTEM_ORG_ID } from '../permissions.js';
+import { getUser, getOrgScope, orgScopeExpr, hasPermission, isActivityViewBound, SYSTEM_ORG_ID } from '../permissions.js';
 import { crossOrgRuleResponse, notFound, forbidden, unauthorized, badRequest } from '../schemas.js';
 
 export function createCrossOrgRuleRoutes(db: Pool) {
@@ -87,6 +87,10 @@ export function createCrossOrgRuleRoutes(db: Pool) {
             if (source_org_id === SYSTEM_ORG_ID) return reply.code(403).send({ error: 'System entities are immutable' });
             if (!await hasPermission(db, req, reply, source_org_id, 'create', 'cross_org_rules')) return reply;
 
+            if (!await isActivityViewBound(db, activity, view)) {
+                return reply.code(400).send({ error: `Activity "${activity}" is not valid for view "${view}"` });
+            }
+
             try {
                 const { rows } = await db.query(
                     `INSERT INTO morbac.cross_org_rules
@@ -106,7 +110,10 @@ export function createCrossOrgRuleRoutes(db: Pool) {
                 );
                 return reply.code(201).send(rows[0]);
             } catch (e: unknown) {
-                if ((e as { code?: string }).code === '23505') return reply.code(409).send({ error: 'Rule already exists' });
+                const code = (e as { code?: string }).code;
+                if (code === '23505') return reply.code(409).send({ error: 'Rule already exists' });
+                if (code === '23503') return reply.code(400).send({ error: 'Unknown activity or view' });
+                if (code === 'P0001') return reply.code(400).send({ error: `Activity "${activity}" is not valid for view "${view}"` });
                 throw e;
             }
         });

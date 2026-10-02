@@ -3,6 +3,8 @@ export interface Org {
     name: string;
     parent_id: string | null;
     metadata: Record<string, unknown>;
+    /** Names from the nearest visible ancestor down to this org. Server-computed. */
+    path?: string[];
 }
 
 export interface Role {
@@ -18,6 +20,23 @@ export interface RoleDetail {
     org_name: string;
     name: string;
     description: string | null;
+    profile_module_id?: string | null;
+    profile_key?: string | null;
+    profile_synced?: boolean | null;
+}
+
+export interface PermissionProfileRule {
+    activity: string;
+    view: string;
+    modality: 'permission' | 'prohibition';
+    scope: string;
+}
+
+export interface PermissionProfile {
+    module_id: string;
+    key: string;
+    content_hash: string;
+    rules: PermissionProfileRule[];
 }
 
 export interface Activity {
@@ -28,6 +47,10 @@ export interface Activity {
 export interface View {
     name: string;
     description: string | null;
+    /** Rows in this view carry no org, so grant it with an unattributed (or all)
+     *  scope rule, a user rule with no org, or a global rule. A tree-scoped rule
+     *  could never match. */
+    no_org?: boolean;
 }
 
 export interface Rule {
@@ -41,6 +64,9 @@ export interface Rule {
     modality: 'permission' | 'prohibition';
     priority: number | null;
     scope: string;
+    valid_from: string | null;
+    valid_until: string | null;
+    is_active: boolean;
 }
 
 export interface CrossOrgRule {
@@ -60,10 +86,11 @@ export interface CrossOrgRule {
 export interface UserRule {
     id: string;
     user_id: string;
-    org_id: string;
+    /** null = unattributed: the rule targets objects with no org. */
+    org_id: string | null;
     user_name: string;
     user_email: string | null;
-    org_name: string;
+    org_name: string | null;
     activity: string;
     view: string;
     modality: 'permission' | 'prohibition';
@@ -165,6 +192,7 @@ export type ActivityViewBinding = { activity: string; view: string };
 
 export interface MorbacApi {
     checkPermission(token: string, orgId: string, activity: string, view: string): Promise<boolean>;
+    clearPermissionCache(): void;
     getOrgs(token: string, orgIds: string[]): Promise<Org[]>;
     createOrg(token: string, orgIds: string[], data: { name: string; parent_id?: string }): Promise<Org>;
     updateOrg(token: string, orgIds: string[], id: string, data: { name?: string; parent_id?: string | null }): Promise<Org>;
@@ -173,6 +201,10 @@ export interface MorbacApi {
     createRole(token: string, orgIds: string[], data: { org_id: string; name: string; description?: string }): Promise<RoleDetail>;
     updateRole(token: string, orgIds: string[], id: string, data: { name?: string; description?: string }): Promise<RoleDetail>;
     deleteRole(token: string, orgIds: string[], id: string): Promise<null>;
+    getPermissionProfiles(token: string, orgIds: string[], moduleId?: string): Promise<PermissionProfile[]>;
+    createRoleFromProfile(token: string, orgIds: string[], data: { org_id: string; name: string; description?: string; sync?: boolean; profile: { module_id: string; key: string } }): Promise<RoleDetail>;
+    attachRoleProfile(token: string, orgIds: string[], roleId: string, data: { profile: { module_id: string; key: string }; sync?: boolean }): Promise<{ role_id: string; module_id: string; profile_key: string; synced: boolean; applied_hash: string }>;
+    detachRoleProfile(token: string, orgIds: string[], roleId: string): Promise<null>;
     getRoleHierarchy(token: string, orgIds: string[]): Promise<RoleHierarchy[]>;
     addRoleHierarchy(token: string, orgIds: string[], data: { senior_role_id: string; junior_role_id: string }): Promise<unknown>;
     removeRoleHierarchy(token: string, orgIds: string[], data: { senior_role_id: string; junior_role_id: string }): Promise<unknown>;
@@ -186,19 +218,21 @@ export interface MorbacApi {
     createCrossOrgRule(token: string, orgIds: string[], data: { source_org_id: string; source_role_id: string; target_org_id: string; activity: string; view: string; modality: 'permission' | 'prohibition'; priority?: number }): Promise<CrossOrgRule>;
     deleteCrossOrgRule(token: string, orgIds: string[], id: string): Promise<null>;
     getUserRules(token: string, orgIds: string[]): Promise<UserRule[]>;
-    createUserRule(token: string, orgIds: string[], data: { user_id: string; org_id: string; activity: string; view: string; modality: 'permission' | 'prohibition'; priority?: number }): Promise<UserRule>;
+    createUserRule(token: string, orgIds: string[], data: { user_id: string; org_id: string | null; activity: string; view: string; modality: 'permission' | 'prohibition'; priority?: number }): Promise<UserRule>;
     deleteUserRule(token: string, orgIds: string[], id: string): Promise<null>;
     getGlobalRules(token: string, orgIds: string[]): Promise<GlobalRule[]>;
     createGlobalRule(token: string, orgIds: string[], data: { user_id?: string | null; activity?: string | null; view?: string | null; modality: 'permission' | 'prohibition'; priority?: number }): Promise<GlobalRule>;
     deleteGlobalRule(token: string, orgIds: string[], id: string): Promise<null>;
     getUsers(token: string, orgIds: string[]): Promise<UserDetail[]>;
-    createUser(token: string, orgIds: string[], data: { email: string; name: string; password?: string; account_type?: 'user' | 'service' }): Promise<UserDetail>;
+    createUser(token: string, orgIds: string[], data: { email: string; name: string; account_type?: 'user' | 'service'; placement?: { role_id: string; org_id: string } }): Promise<UserDetail>;
     updateUser(token: string, orgIds: string[], id: string, data: { name?: string; email?: string; is_active?: boolean; reset_password?: boolean }): Promise<UserDetail>;
     deleteUser(token: string, orgIds: string[], id: string): Promise<null>;
     getUserKeys(token: string, orgIds: string[], userId: string): Promise<ServiceAccountKey[]>;
     getUserPermissionOptions(token: string, orgIds: string[], userId: string): Promise<Array<{ activity: string; view: string }>>;
     createUserKey(token: string, orgIds: string[], userId: string, data: { name: string; description?: string; readonly?: boolean; expires_at?: string | null; permission_scope?: 'inherit' | Array<{ activity: string; view: string }> }): Promise<ServiceAccountKey>;
     deleteUserKey(token: string, orgIds: string[], userId: string, keyId: string): Promise<null>;
+    getUserOrgFilter(token: string, orgIds: string[], userId: string): Promise<{ org_filter: string[] }>;
+    updateUserOrgFilter(token: string, orgIds: string[], userId: string, orgFilter: string[]): Promise<{ org_filter: string[] }>;
     assignRole(token: string, orgIds: string[], data: { user_id: string; role_id: string; org_id: string }): Promise<unknown>;
     removeRole(token: string, orgIds: string[], data: { user_id: string; role_id: string; org_id: string }): Promise<unknown>;
     getActivityUsers(token: string, orgIds: string[], name: string): Promise<RuleUser[]>;
@@ -228,24 +262,64 @@ export function createMorbacApi(apiUrl: string): MorbacApi {
         });
         if (res.status === 204) return null;
         const data = await res.json();
-        if (!res.ok) throw new Error((data as { error?: string }).error || 'Request failed');
+        if (!res.ok) {
+            const d = data as { error?: string; message?: string; errorId?: string };
+            const err = new Error(d.message || d.error || `Request failed (HTTP ${res.status})`) as
+                Error & { status: number; code?: string; errorId?: string };
+            err.status = res.status;
+            err.code = d.error;
+            err.errorId = d.errorId;
+            throw err;
+        }
         return data;
     }
 
+    const permCache = new Map<string, { value: boolean; expires: number }>();
+    const permInflight = new Map<string, Promise<boolean>>();
+    const PERM_TTL_MS = 30_000;
+
+    async function fetchPermission(token: string, orgId: string, activity: string, view: string): Promise<boolean> {
+        const res = await fetch(`${apiUrl}/me/permissions/check`, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                'X-Org-Id': orgId,
+            },
+            credentials: 'include',
+            body: JSON.stringify({ p_activity: activity, p_view: view }),
+        });
+        if (!res.ok) {
+            const d = await res.json().catch(() => ({})) as { error?: string; message?: string; errorId?: string };
+            const err = new Error(d.message || d.error || `Permission check failed (HTTP ${res.status})`) as
+                Error & { status: number; code?: string; errorId?: string };
+            err.status = res.status;
+            err.code = d.error;
+            err.errorId = d.errorId;
+            throw err;
+        }
+        return res.json() as Promise<boolean>;
+    }
+
     return {
-        checkPermission: async (token, orgId, activity, view) => {
-            const res = await fetch(`${apiUrl}/me/permissions/check`, {
-                method: 'POST',
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                    'X-Org-Id': orgId,
-                },
-                credentials: 'include',
-                body: JSON.stringify({ p_activity: activity, p_view: view }),
+        checkPermission: (token, orgId, activity, view) => {
+            const key = `${token}\x00${orgId}\x00${activity}\x00${view}`;
+            const cached = permCache.get(key);
+            if (cached && cached.expires > Date.now()) return Promise.resolve(cached.value);
+            const existing = permInflight.get(key);
+            if (existing) return existing;
+            const p = fetchPermission(token, orgId, activity, view).then((value) => {
+                permCache.set(key, { value, expires: Date.now() + PERM_TTL_MS });
+                return value;
             });
-            if (!res.ok) return false;
-            return res.json() as Promise<boolean>;
+            permInflight.set(key, p);
+            void p.finally(() => permInflight.delete(key)).catch(() => {});
+            return p;
+        },
+
+        clearPermissionCache: () => {
+            permCache.clear();
+            permInflight.clear();
         },
 
         getOrgs:   (t, orgIds) => api('GET', '/orgs', t, orgIds) as Promise<Org[]>,
@@ -257,6 +331,13 @@ export function createMorbacApi(apiUrl: string): MorbacApi {
         createRole: (t, orgIds, d) => api('POST', '/roles', t, orgIds, d) as Promise<RoleDetail>,
         updateRole: (t, orgIds, id, d) => api('PATCH', `/roles/${id}`, t, orgIds, d) as Promise<RoleDetail>,
         deleteRole: (t, orgIds, id) => api('DELETE', `/roles/${id}`, t, orgIds) as Promise<null>,
+
+        getPermissionProfiles: (t, orgIds, moduleId) =>
+            api('GET', moduleId ? `/permission-profiles?module_id=${encodeURIComponent(moduleId)}` : '/permission-profiles', t, orgIds) as Promise<PermissionProfile[]>,
+        createRoleFromProfile: (t, orgIds, d) => api('POST', '/roles/from-profile', t, orgIds, d) as Promise<RoleDetail>,
+        attachRoleProfile: (t, orgIds, roleId, d) =>
+            api('POST', `/roles/${roleId}/profile-sync`, t, orgIds, d) as Promise<{ role_id: string; module_id: string; profile_key: string; synced: boolean; applied_hash: string }>,
+        detachRoleProfile: (t, orgIds, roleId) => api('DELETE', `/roles/${roleId}/profile-sync`, t, orgIds) as Promise<null>,
 
         getRoleHierarchy:    (t, orgIds) => api('GET', '/role-hierarchy', t, orgIds) as Promise<RoleHierarchy[]>,
         addRoleHierarchy:    (t, orgIds, d) => api('POST', '/role-hierarchy', t, orgIds, d),
@@ -291,6 +372,9 @@ export function createMorbacApi(apiUrl: string): MorbacApi {
         getUserPermissionOptions: (t, orgIds, userId) => api('GET', `/users/${userId}/permission-options`, t, orgIds) as Promise<Array<{ activity: string; view: string }>>,
         createUserKey: (t, orgIds, userId, d) => api('POST', `/users/${userId}/keys`, t, orgIds, d) as Promise<ServiceAccountKey>,
         deleteUserKey: (t, orgIds, userId, keyId) => api('DELETE', `/users/${userId}/keys/${keyId}`, t, orgIds) as Promise<null>,
+
+        getUserOrgFilter:    (t, orgIds, userId) => api('GET', `/users/${encodeURIComponent(userId)}/org-filter`, t, orgIds) as Promise<{ org_filter: string[] }>,
+        updateUserOrgFilter: (t, orgIds, userId, orgFilter) => api('PATCH', `/users/${encodeURIComponent(userId)}/org-filter`, t, orgIds, { org_filter: orgFilter }) as Promise<{ org_filter: string[] }>,
 
         assignRole: (t, orgIds, d) => api('POST', `/users/${d.user_id}/roles`, t, orgIds, { role_id: d.role_id, org_id: d.org_id }),
         removeRole: (t, orgIds, d) => api('DELETE', `/users/${d.user_id}/roles`, t, orgIds, { role_id: d.role_id, org_id: d.org_id }),

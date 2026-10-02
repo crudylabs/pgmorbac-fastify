@@ -1,7 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 import { getUser, getOrgScope, hasPermission, getAccountType } from '../permissions.js';
+
 import { notFound, forbidden, unauthorized, badRequest } from '../schemas.js';
+import { callerControlsRoleOrg } from './role-authority.js';
 
 export function createUserRoleRoutes(db: Pool) {
     return async function userRoleRoutes(app: FastifyInstance) {
@@ -44,6 +46,9 @@ export function createUserRoleRoutes(db: Pool) {
             if (assignType === 'system') return reply.code(403).send({ error: 'System account roles are immutable' });
             const assignView = assignType === 'service' ? 'service_users' : 'user_roles';
             if (!await hasPermission(db, req, reply, org_id, 'create', assignView)) return reply;
+            if (!await callerControlsRoleOrg(db, caller.id, role_id, 'create')) {
+                return reply.code(403).send({ error: 'Cannot assign a role outside your authority' });
+            }
 
             try {
                 await db.query(
@@ -172,6 +177,9 @@ export function createUserRoleRoutes(db: Pool) {
             if (revokeType === 'system') return reply.code(403).send({ error: 'System account roles are immutable' });
             const revokeView = revokeType === 'service' ? 'service_users' : 'user_roles';
             if (!await hasPermission(db, req, reply, org_id, 'delete', revokeView)) return reply;
+            if (!await callerControlsRoleOrg(db, caller.id, role_id, 'delete')) {
+                return reply.code(403).send({ error: 'Cannot revoke a role outside your authority' });
+            }
 
             await db.query(
                 'SELECT morbac.revoke_role($1::UUID, $2::UUID, $3::UUID)',

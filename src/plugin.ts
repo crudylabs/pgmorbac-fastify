@@ -7,6 +7,7 @@ import { createUserRoutes }     from './routes/users.js';
 import { createGlobalRoutes }   from './routes/globals.js';
 import { createActivityRoutes } from './routes/activities.js';
 import { createDelegationRoutes } from './routes/delegations.js';
+import { createPermissionProfileRoutes } from './routes/permission-profiles.js';
 
 export type CheckLimitFn = (
     reply: FastifyReply,
@@ -43,6 +44,7 @@ export function createMgmtRoutes(opts: MgmtPluginOptions) {
     return async function mgmtRoutes(app: FastifyInstance) {
         await app.register(createOrgRoutes(db, checkLimit, emitOrgEvent));
         await app.register(createRoleRoutes(db, checkLimit, emitRoleEvent));
+        await app.register(createPermissionProfileRoutes(db, checkLimit, emitRoleEvent));
         await app.register(createRuleRoutes(db));
         await app.register(createUserRoutes(db, checkLimit));
         await app.register(createGlobalRoutes(db));

@@ -1,7 +1,7 @@
 import { randomBytes, createHash } from 'node:crypto';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { Pool } from 'pg';
-import { getUser, getOrgScope, hasPermission, getAccountType } from '../permissions.js';
+import { getUser, canActOnUser, checkApiKeyScope, getAccountType } from '../permissions.js';
 import { notFound, forbidden, unauthorized, badRequest } from '../schemas.js';
 
 function generateKey(): { raw: string; hash: string; prefix: string } {
@@ -78,11 +78,10 @@ export function createUserKeyRoutes(db: Pool) {
         }, async (req, reply) => {
             const user = getUser(req);
             if (!user) return reply.code(401).send({ error: 'Authentication required' });
-            const orgIds = getOrgScope(req, reply, false);
-            if (orgIds === null) return reply;
             const { id } = req.params as { id: string };
             if (!await ensureService(id, reply)) return reply;
-            if (!await hasPermission(db, req, reply, orgIds[0] ?? null, 'read', 'service_users')) return reply;
+            if (!checkApiKeyScope(req, reply, 'read', 'service_users')) return reply;
+            if (!await canActOnUser(db, user.id, id, 'read', 'service_users')) return reply.code(404).send({ error: 'Not found' });
 
             const { rows } = await db.query(
                 `SELECT id, name, description, key_prefix, readonly, permission_scope, expires_at, last_used_at, created_at
@@ -107,11 +106,10 @@ export function createUserKeyRoutes(db: Pool) {
         }, async (req, reply) => {
             const user = getUser(req);
             if (!user) return reply.code(401).send({ error: 'Authentication required' });
-            const orgIds = getOrgScope(req, reply, false);
-            if (orgIds === null) return reply;
             const { id } = req.params as { id: string };
             if (!await ensureService(id, reply)) return reply;
-            if (!await hasPermission(db, req, reply, orgIds[0] ?? null, 'read', 'service_users')) return reply;
+            if (!checkApiKeyScope(req, reply, 'read', 'service_users')) return reply;
+            if (!await canActOnUser(db, user.id, id, 'read', 'service_users')) return reply.code(404).send({ error: 'Not found' });
 
             return heldPerms(db, id);
         });
@@ -142,11 +140,10 @@ export function createUserKeyRoutes(db: Pool) {
         }, async (req, reply) => {
             const user = getUser(req);
             if (!user) return reply.code(401).send({ error: 'Authentication required' });
-            const orgIds = getOrgScope(req, reply, false);
-            if (orgIds === null) return reply;
             const { id } = req.params as { id: string };
             if (!await ensureService(id, reply)) return reply;
-            if (!await hasPermission(db, req, reply, orgIds[0] ?? null, 'create', 'service_users')) return reply;
+            if (!checkApiKeyScope(req, reply, 'create', 'service_users')) return reply;
+            if (!await canActOnUser(db, user.id, id, 'create', 'service_users')) return reply.code(404).send({ error: 'Not found' });
 
             const { name, description, readonly = false, expires_at, permission_scope } = req.body as {
                 name: string; description?: string; readonly?: boolean; expires_at?: string | null; permission_scope?: Scope;
@@ -201,11 +198,10 @@ export function createUserKeyRoutes(db: Pool) {
         }, async (req, reply) => {
             const user = getUser(req);
             if (!user) return reply.code(401).send({ error: 'Authentication required' });
-            const orgIds = getOrgScope(req, reply, false);
-            if (orgIds === null) return reply;
             const { id, keyId } = req.params as { id: string; keyId: string };
             if (!await ensureService(id, reply)) return reply;
-            if (!await hasPermission(db, req, reply, orgIds[0] ?? null, 'delete', 'service_users')) return reply;
+            if (!checkApiKeyScope(req, reply, 'delete', 'service_users')) return reply;
+            if (!await canActOnUser(db, user.id, id, 'delete', 'service_users')) return reply.code(404).send({ error: 'Not found' });
 
             await db.query('DELETE FROM app.api_keys WHERE id = $1 AND user_id = $2', [keyId, id]);
             return reply.code(204).send();

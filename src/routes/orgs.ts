@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { withMorbacContext } from '../rls-context.js';
 import type { Pool } from 'pg';
 import type { CheckLimitFn, OrgEventSink } from '../plugin.js';
 import {
@@ -6,7 +7,10 @@ import {
 } from '../permissions.js';
 import { orgResponse, notFound, forbidden, unauthorized, badRequest } from '../schemas.js';
 
+import { withOrgPaths } from '../org-paths.js';
+
 interface OrgRow { id: string; name: string; parent_id: string | null; metadata?: Record<string, unknown> }
+
 
 export function createOrgRoutes(db: Pool, checkLimit?: CheckLimitFn, emitOrgEvent?: OrgEventSink) {
     return async function orgRoutes(app: FastifyInstance) {
@@ -29,22 +33,23 @@ export function createOrgRoutes(db: Pool, checkLimit?: CheckLimitFn, emitOrgEven
             if (orgIds === null) return reply;
 
             if (orgIds.length === 0) {
-                const { rows: adminCheck } = await db.query<{ allowed: boolean }>(
-                    'SELECT morbac.is_allowed($1::UUID, NULL::UUID, $2, $3) AS allowed',
-                    [user.id, 'read', 'orgs'],
-                );
-                if (adminCheck[0]?.allowed) {
-                    const { rows } = await db.query(
-                        'SELECT id, name, parent_id, metadata FROM morbac.orgs ORDER BY name',
-                    );
-                    return rows;
-                }
-                const { rows } = await db.query(
-                    `SELECT DISTINCT o.id, o.name, o.parent_id, o.metadata
-                     FROM morbac.orgs o
-                     INNER JOIN morbac.user_roles ur ON ur.org_id = o.id AND ur.user_id = $1
-                     ORDER BY o.name`,
-                    [user.id],
+                // Unpinned: the caller's whole perimeter. Two ways in, and both
+                // are needed. A rule scoped to a subtree, a user rule or a
+                // cross-org rule reaches orgs the caller holds no role in, and
+                // those belong in the org filter. A role in an org puts the
+                // caller in it even with no read/orgs rule, and the org filter is
+                // what supplies X-Org-Id, so dropping those orgs leaves such a
+                // user with an empty perimeter and an app that does nothing.
+                const { rows } = await withMorbacContext(db, { userId: user.id }, (client) =>
+                    client.query(
+                        withOrgPaths(
+                            `SELECT id, name, parent_id, metadata FROM morbac.orgs o
+                             WHERE morbac.is_allowed($1::UUID, o.id, 'read', 'orgs')
+                                OR EXISTS (SELECT 1 FROM morbac.user_roles ur
+                                           WHERE ur.org_id = o.id AND ur.user_id = $1)`,
+                        ),
+                        [user.id],
+                    ),
                 );
                 return rows;
             }
@@ -53,9 +58,11 @@ export function createOrgRoutes(db: Pool, checkLimit?: CheckLimitFn, emitOrgEven
 
             const isSystemScope = orgIds.includes(SYSTEM_ORG_ID);
             const { expr, params } = isSystemScope ? { expr: '', params: [] } : orgScopeExpr(orgIds, 'id');
-            const { rows } = await db.query(
-                `SELECT id, name, parent_id, metadata FROM morbac.orgs ${expr ? `WHERE ${expr}` : ''} ORDER BY name`,
-                params,
+            const { rows } = await withMorbacContext(db, { userId: user.id, orgId: orgIds[0] }, (client) =>
+                client.query(
+                    withOrgPaths(`SELECT id, name, parent_id, metadata FROM morbac.orgs ${expr ? `WHERE ${expr}` : ''}`),
+                    params,
+                ),
             );
             return rows;
         });
@@ -140,6 +147,25 @@ export function createOrgRoutes(db: Pool, checkLimit?: CheckLimitFn, emitOrgEven
             if (!await hasPermission(db, req, reply, id, 'update', 'orgs')) return reply;
 
             const body = req.body as { name?: string; parent_id?: string | null };
+
+            // Reparenting must be authorized against the destination, not just the
+            // moved org, and must not create a cycle (new parent within own subtree).
+            if ('parent_id' in body) {
+                if (body.parent_id === null) {
+                    if (!await hasPermission(db, req, reply, id, 'create', 'root_orgs')) return reply;
+                } else if (body.parent_id) {
+                    if (body.parent_id === id) return reply.code(400).send({ error: 'invalid_parent' });
+                    const { rows: [cycle] } = await db.query<{ inside: boolean }>(
+                        `SELECT EXISTS (
+                             SELECT 1 FROM morbac.get_org_scope($1::UUID, 'subtree') AS s(org_id)
+                             WHERE s.org_id = $2::UUID
+                         ) AS inside`,
+                        [id, body.parent_id],
+                    );
+                    if (cycle?.inside) return reply.code(400).send({ error: 'invalid_parent' });
+                    if (!await hasPermission(db, req, reply, body.parent_id, 'create', 'orgs')) return reply;
+                }
+            }
             const { rows } = await db.query<OrgRow & { reparented: boolean }>(
                 `WITH prev AS (SELECT parent_id AS old_parent FROM morbac.orgs WHERE id = $4)
                  UPDATE morbac.orgs o

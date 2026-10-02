@@ -4,7 +4,11 @@ import type { CheckLimitFn, RoleEventSink } from '../plugin.js';
 import {
     getUser, getOrgScope, orgScopeExpr, hasPermission, SYSTEM_ORG_ID,
 } from '../permissions.js';
+import { parseListParams, composeWhere, setContentRange, ListQueryError } from '../list-query.js';
 import { roleResponse, notFound, forbidden, unauthorized, badRequest } from '../schemas.js';
+
+const ROLE_SORTABLE = { name: 'r.name', org_name: 'o.name' };
+const ROLE_FILTERABLE = { name: 'r.name', description: 'r.description', org_id: 'r.org_id' };
 
 export function createRoleRoutes(db: Pool, checkLimit?: CheckLimitFn, emitRoleEvent?: RoleEventSink) {
     return async function roleRoutes(app: FastifyInstance) {
@@ -29,15 +33,35 @@ export function createRoleRoutes(db: Pool, checkLimit?: CheckLimitFn, emitRoleEv
             if (!await hasPermission(db, req, reply, orgIds[0] ?? null, 'read', 'roles')) return reply;
 
             const { expr, params } = orgScopeExpr(orgIds, 'r.org_id');
+            let list;
+            try {
+                list = parseListParams(req.query as Record<string, unknown>, {
+                    sortable: ROLE_SORTABLE,
+                    filterable: ROLE_FILTERABLE,
+                    defaultOrder: 'org_name.asc,name.asc',
+                }, params.length + 1);
+            } catch (e) {
+                if (e instanceof ListQueryError) return reply.code(400).send({ error: 'invalid_query' });
+                throw e;
+            }
+
+            const where = composeWhere(expr, list.filterSql);
             const { rows } = await db.query(
-                `SELECT r.id, r.org_id, r.name, r.description, o.name AS org_name
+                `SELECT r.id, r.org_id, r.name, r.description, o.name AS org_name,
+                        rpl.module_id AS profile_module_id, rpl.profile_key, rpl.synced AS profile_synced,
+                        count(*) OVER() AS _total
                  FROM morbac.roles r
                  JOIN morbac.orgs o ON o.id = r.org_id
-                 ${expr ? `WHERE ${expr}` : ''}
-                 ORDER BY o.name, r.name`,
-                params,
+                 LEFT JOIN app.role_profile_links rpl ON rpl.role_id = r.id
+                 ${where}
+                 ${list.orderSql || 'ORDER BY o.name, r.name'}
+                 ${list.pageSql}`,
+                [...params, ...list.allParams],
             );
-            return rows;
+
+            const total = rows.length > 0 ? Number((rows[0] as { _total: string })._total) : 0;
+            setContentRange(reply, list.offset, rows.length, total);
+            return (rows as Array<Record<string, unknown>>).map(({ _total, ...rest }) => rest);
         });
 
         app.post('/roles', {

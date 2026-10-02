@@ -1,9 +1,36 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import type { Pool } from 'pg';
+import { hasPermission, hasPermissionAny } from './permissions.js';
 
 export interface DataPermission {
     activity: string;
     view: string;
+}
+
+/** Rows returned by a GET that does not ask for a page size. */
+export const DEFAULT_PAGE_LIMIT = 100;
+
+/**
+ * Largest page a caller may ask for. Deliberately well above the table's
+ * page-size options; bulk reads belong on the export routes, which stream
+ * from a cursor instead of buffering a PostgREST response.
+ *
+ * Not configurable: an env override would be an escape hatch around the cap.
+ */
+export const MAX_PAGE_LIMIT = 1000;
+
+/**
+ * Rejects rather than clamps. A clamp answers 200 with a short Content-Range
+ * that the caller reads as authoritative, so a truncated read looks like a
+ * complete one and surfaces later as wrong numbers. A 400 surfaces at the
+ * call site immediately.
+ */
+function checkLimit(rawQs: string): { ok: true } | { ok: false } {
+    for (const value of new URLSearchParams(rawQs).getAll('limit')) {
+        const n = Number(value);
+        if (!Number.isInteger(n) || n < 0 || n > MAX_PAGE_LIMIT) return { ok: false };
+    }
+    return { ok: true };
 }
 
 export type ProxyDataRouteFn = (
@@ -44,6 +71,7 @@ export function createProxyRegistry(db: Pool, postgrestUrl: string): ProxyRegist
             method,
             url: publicPath,
             schema: { hide: true } as Record<string, unknown>,
+            config: { permission },
             handler: makeHandler(upstreamResource, permission),
         });
     }
@@ -56,16 +84,42 @@ export function createProxyRegistry(db: Pool, postgrestUrl: string): ProxyRegist
             if (permission !== null) {
                 const orgId = req.headers['x-org-id'];
                 const orgIdVal = Array.isArray(orgId) ? orgId[0] : orgId;
-                if (!orgIdVal) return reply.code(400).send({ error: 'X-Org-Id header is required' });
+                const orgIds = req.headers['x-org-ids'];
+                const orgIdsVal = Array.isArray(orgIds) ? orgIds[0] : orgIds;
 
-                const { rows } = await db.query<{ allowed: boolean }>(
-                    'SELECT morbac.is_allowed($1::UUID, $2::UUID, $3, $4) AS allowed',
-                    [user.id, orgIdVal, permission.activity, permission.view],
-                );
-                if (!rows[0]?.allowed) return reply.code(403).send({ error: 'Forbidden' });
+                // Goes through hasPermission rather than is_allowed directly: it is
+                // the only place an API key's permission_scope is applied, so an
+                // inline check would let a narrowly scoped key act as its full user.
+                if (orgIdVal) {
+                    if (!await hasPermission(db, req, reply, orgIdVal, permission.activity, permission.view)) {
+                        return reply;
+                    }
+                } else if (orgIdsVal && orgIdsVal.trim()) {
+                    // A multi-org list read (e.g. "all organizations"): scoped to the
+                    // set via X-Org-Ids. RLS filters each row, so the gate only needs
+                    // permission in one of them.
+                    const ids = orgIdsVal.split(',').map(s => s.trim()).filter(Boolean);
+                    if (!await hasPermissionAny(db, req, reply, ids, permission.activity, permission.view)) {
+                        return reply;
+                    }
+                } else {
+                    return reply.code(400).send({ error: 'X-Org-Id header is required' });
+                }
             }
 
-            const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+            const qsIndex = req.url.indexOf('?');
+            const rawQs = qsIndex === -1 ? '' : req.url.slice(qsIndex + 1);
+
+            if (!checkLimit(rawQs).ok) return reply.code(400).send({ error: 'limit_exceeded' });
+
+            // Only reads get a default page. On PATCH and DELETE, PostgREST reads
+            // limit as a bound on the affected rows, so injecting one would
+            // silently truncate a bulk mutation.
+            let qs = rawQs ? `?${rawQs}` : '';
+            if (req.method === 'GET' && !new URLSearchParams(rawQs).has('limit')) {
+                qs = rawQs ? `?${rawQs}&limit=${DEFAULT_PAGE_LIMIT}` : `?limit=${DEFAULT_PAGE_LIMIT}`;
+            }
+
             const url = `${postgrestUrl}/${upstreamResource}${qs}`;
 
             const headers: Record<string, string> = {};

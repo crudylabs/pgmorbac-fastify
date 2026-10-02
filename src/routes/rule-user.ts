@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
-import { getUser, getOrgScope, orgScopeExpr, hasPermission } from '../permissions.js';
+import { getUser, getOrgScope, orgScopeExpr, hasPermission, isActivityViewBound } from '../permissions.js';
 import { userRuleResponse, notFound, forbidden, unauthorized, badRequest } from '../schemas.js';
 
 export function createUserRuleRoutes(db: Pool) {
@@ -33,7 +33,7 @@ export function createUserRuleRoutes(db: Pool) {
                         o.name  AS org_name,
                         ur.activity, ur.view, ur.modality, ur.priority
                  FROM morbac.user_rules ur
-                 JOIN morbac.orgs  o ON o.id = ur.org_id
+                 LEFT JOIN morbac.orgs  o ON o.id = ur.org_id
                  LEFT JOIN app.users u ON u.id = ur.user_id
                  ${expr ? `WHERE ${expr}` : ''}
                  ORDER BY o.name, ur.activity, ur.view`,
@@ -53,7 +53,10 @@ export function createUserRuleRoutes(db: Pool) {
                     required: ['user_id', 'org_id', 'activity', 'view', 'modality'],
                     properties: {
                         user_id:  { type: 'string', format: 'uuid' },
-                        org_id:   { type: 'string', format: 'uuid' },
+                        org_id:   {
+                            type: 'string', format: 'uuid', nullable: true,
+                            description: 'Organisation the rule targets, or null for unattributed objects (those with no org).',
+                        },
                         activity: { type: 'string' },
                         view:     { type: 'string' },
                         modality: { type: 'string', enum: ['permission', 'prohibition'] },
@@ -71,11 +74,15 @@ export function createUserRuleRoutes(db: Pool) {
             if (!user) return reply.code(401).send({ error: 'Authentication required' });
 
             const { user_id, org_id, activity, view, modality, priority } = req.body as {
-                user_id: string; org_id: string; activity: string;
+                user_id: string; org_id: string | null; activity: string;
                 view: string; modality: 'permission' | 'prohibition'; priority?: number;
             };
 
             if (!await hasPermission(db, req, reply, org_id, 'create', 'user_rules')) return reply;
+
+            if (!await isActivityViewBound(db, activity, view)) {
+                return reply.code(400).send({ error: `Activity "${activity}" is not valid for view "${view}"` });
+            }
 
             try {
                 const { rows } = await db.query(
@@ -95,7 +102,9 @@ export function createUserRuleRoutes(db: Pool) {
                 );
                 return reply.code(201).send(rows[0]);
             } catch (e: unknown) {
-                if ((e as { code?: string }).code === '23505') return reply.code(409).send({ error: 'Rule already exists' });
+                const code = (e as { code?: string }).code;
+                if (code === '23505') return reply.code(409).send({ error: 'Rule already exists' });
+                if (code === '23503') return reply.code(400).send({ error: 'Unknown activity or view' });
                 throw e;
             }
         });

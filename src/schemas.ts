@@ -5,17 +5,21 @@ export const orgResponse = {
         name:      { type: 'string' },
         parent_id: { type: 'string', format: 'uuid', nullable: true },
         metadata:  { type: 'object' },
+        path:      { type: 'array', items: { type: 'string' } },
     },
 };
 
 export const roleResponse = {
     type: 'object',
     properties: {
-        id:          { type: 'string', format: 'uuid' },
-        org_id:      { type: 'string', format: 'uuid' },
-        org_name:    { type: 'string' },
-        name:        { type: 'string' },
-        description: { type: 'string', nullable: true },
+        id:                { type: 'string', format: 'uuid' },
+        org_id:            { type: 'string', format: 'uuid' },
+        org_name:          { type: 'string' },
+        name:              { type: 'string' },
+        description:       { type: 'string', nullable: true },
+        profile_module_id: { type: 'string', nullable: true },
+        profile_key:       { type: 'string', nullable: true },
+        profile_synced:    { type: 'boolean', nullable: true },
     },
 };
 
@@ -32,6 +36,9 @@ export const ruleResponse = {
         modality:  { type: 'string', enum: ['permission', 'prohibition'] },
         priority:  { type: 'integer', nullable: true },
         scope:     { type: 'string' },
+        valid_from:  { type: 'string', format: 'date-time', nullable: true },
+        valid_until: { type: 'string', format: 'date-time', nullable: true },
+        is_active:   { type: 'boolean' },
     },
 };
 
@@ -82,10 +89,11 @@ export const userRuleResponse = {
     properties: {
         id:         { type: 'string', format: 'uuid' },
         user_id:    { type: 'string', format: 'uuid' },
-        org_id:     { type: 'string', format: 'uuid' },
+        // null org = unattributed (the rule targets objects with no org)
+        org_id:     { type: 'string', format: 'uuid', nullable: true },
         user_name:  { type: 'string' },
         user_email: { type: 'string', nullable: true },
-        org_name:   { type: 'string' },
+        org_name:   { type: 'string', nullable: true },
         activity:   { type: 'string' },
         view:       { type: 'string' },
         modality:   { type: 'string', enum: ['permission', 'prohibition'] },

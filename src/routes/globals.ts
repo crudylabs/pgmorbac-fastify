@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
-import { getUser, hasPermission, SYSTEM_ORG_ID } from '../permissions.js';
-import { globalRuleResponse, notFound, forbidden, unauthorized } from '../schemas.js';
+import { getUser, hasPermission, isActivityViewBound, SYSTEM_ORG_ID } from '../permissions.js';
+import { globalRuleResponse, notFound, forbidden, unauthorized, badRequest } from '../schemas.js';
 
 export function createGlobalRoutes(db: Pool) {
     return async function globalRoutes(app: FastifyInstance) {
@@ -57,7 +57,7 @@ export function createGlobalRoutes(db: Pool) {
                 },
                 response: {
                     201: globalRuleResponse,
-                    401: unauthorized, 403: forbidden,
+                    400: badRequest, 401: unauthorized, 403: forbidden,
                     409: { description: 'Rule already exists.' },
                 },
             },
@@ -79,6 +79,12 @@ export function createGlobalRoutes(db: Pool) {
 
             if (!await hasPermission(db, req, reply, SYSTEM_ORG_ID, 'create', 'rules')) return reply;
 
+            // activity/view null = wildcard (e.g. the global admin rule) - not a concrete
+            // pair to validate against the bindings whitelist.
+            if (activity && view && !await isActivityViewBound(db, activity, view)) {
+                return reply.code(400).send({ error: `Activity "${activity}" is not valid for view "${view}"` });
+            }
+
             try {
                 const { rows } = await db.query(
                     `INSERT INTO morbac.global_rules (user_id, activity, view, context_id, modality, priority)
@@ -93,7 +99,9 @@ export function createGlobalRoutes(db: Pool) {
                 );
                 return reply.code(201).send(rows[0]);
             } catch (e: unknown) {
-                if ((e as { code?: string }).code === '23505') return reply.code(409).send({ error: 'Rule already exists' });
+                const code = (e as { code?: string }).code;
+                if (code === '23505') return reply.code(409).send({ error: 'Rule already exists' });
+                if (code === '23503') return reply.code(400).send({ error: 'Unknown activity or view' });
                 throw e;
             }
         });

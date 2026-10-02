@@ -9,7 +9,7 @@ export function createActivityRoutes(db: Pool) {
             schema: {
                 tags: ['Management'],
                 summary: 'List activities',
-                description: 'Read-only list of permission verbs (read, create, update, delete). Managed at the database level.',
+                description: 'Read-only list of permission verbs (read, create, update, delete). Managed at the database level. Requires `read`/`rules`.',
                 security: [{ oauth2: [] }],
                 response: {
                     200: {
@@ -23,11 +23,15 @@ export function createActivityRoutes(db: Pool) {
                         },
                     },
                     401: unauthorized,
+                    403: forbidden,
                 },
             },
         }, async (req, reply) => {
             const user = getUser(req);
             if (!user) return reply.code(401).send({ error: 'Authentication required' });
+            const orgIds = getOrgScope(req, reply, false);
+            if (orgIds === null) return reply;
+            if (!await hasPermission(db, req, reply, orgIds[0] ?? null, 'read', 'rules')) return reply;
             const { rows } = await db.query('SELECT name, description FROM morbac.activities ORDER BY name');
             return rows;
         });
@@ -115,16 +119,28 @@ export function createActivityRoutes(db: Pool) {
                             properties: {
                                 name:        { type: 'string' },
                                 description: { type: 'string', nullable: true },
+                                no_org:      { type: 'boolean' },
                             },
                         },
                     },
                     401: unauthorized,
+                    403: forbidden,
                 },
             },
         }, async (req, reply) => {
             const user = getUser(req);
             if (!user) return reply.code(401).send({ error: 'Authentication required' });
-            const { rows } = await db.query('SELECT name, description FROM morbac.views ORDER BY name');
+            const orgIds = getOrgScope(req, reply, false);
+            if (orgIds === null) return reply;
+            if (!await hasPermission(db, req, reply, orgIds[0] ?? null, 'read', 'rules')) return reply;
+            // no_org marks a view whose rows carry no org, so callers can offer the
+            // unattributed grant instead of a tree-scoped rule that could never match.
+            const { rows } = await db.query(
+                `SELECT v.name, v.description, COALESCE(f.no_org, FALSE) AS no_org
+                 FROM morbac.views v
+                 LEFT JOIN app.view_flags f ON f.view = v.name
+                 ORDER BY v.name`,
+            );
             return rows;
         });
 
@@ -215,11 +231,15 @@ export function createActivityRoutes(db: Pool) {
                         },
                     },
                     401: unauthorized,
+                    403: forbidden,
                 },
             },
         }, async (req, reply) => {
             const user = getUser(req);
             if (!user) return reply.code(401).send({ error: 'Authentication required' });
+            const orgIds = getOrgScope(req, reply, false);
+            if (orgIds === null) return reply;
+            if (!await hasPermission(db, req, reply, orgIds[0] ?? null, 'read', 'rules')) return reply;
             const { rows } = await db.query(
                 'SELECT activity, view FROM morbac.activity_view_bindings ORDER BY activity, view',
             );

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
-import { getUser, getOrgScope, orgScopeExpr, hasPermission, SYSTEM_ORG_ID } from '../permissions.js';
+import { getUser, getOrgScope, orgScopeExpr, hasPermission, canActOnUser, SYSTEM_ORG_ID } from '../permissions.js';
 import { delegationResponse, notFound, forbidden, unauthorized, badRequest } from '../schemas.js';
 
 const SELECT_COLUMNS = `
@@ -83,6 +83,14 @@ export function createDelegationRoutes(db: Pool) {
             if (delegator_id === delegatee_id) return reply.code(400).send({ error: 'delegator_and_delegatee_must_differ' });
 
             if (!await hasPermission(db, req, reply, org_id, 'create', 'delegations')) return reply;
+
+            // The caller must be the delegator, or hold authority over them. Otherwise
+            // any create/delegations holder could self-grant a powerful role held by
+            // another principal by naming them as delegator.
+            if (delegator_id !== user.id
+                && !await canActOnUser(db, user.id, delegator_id, 'create', 'user_roles')) {
+                return reply.code(403).send({ error: 'Cannot delegate on behalf of this user' });
+            }
 
             const from = valid_from ? new Date(valid_from) : new Date();
             const until = new Date(valid_until);

@@ -1,9 +1,8 @@
 {
   "name": "@crudy/pgmorbac",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "Crudy pgmorbac - Multi-OrBAC permission helpers for Fastify and PostgreSQL",
-  "license": "Apache-2.0",
   "keywords": [
     "morbac",
     "orbac",
@@ -16,28 +15,77 @@
     "multi-tenant"
   ],
   "author": "Marc Villain",
-  "homepage": "https://pgmorbac.villains.fr",
+  "homepage": "https://pgmorbac.crudy.fr",
   "repository": {
     "type": "git",
-    "url": "https://git.villains.fr/crudy/pgmorbac-node.git"
+    "url": "https://github.com/crudylabs/pgmorbac-node.git"
   },
   "bugs": {
-    "url": "https://git.villains.fr/crudy/pgmorbac-node/issues"
+    "url": "https://github.com/crudylabs/pgmorbac-node/issues"
   },
   "exports": {
-    ".":             { "types": "./dist/index.d.ts",       "source": "./src/index.ts",       "default": "./dist/index.js" },
-    "./permissions": { "types": "./dist/permissions.d.ts", "source": "./src/permissions.ts", "default": "./dist/permissions.js" },
-    "./proxy":       { "types": "./dist/proxy.d.ts",       "source": "./src/proxy.ts",       "default": "./dist/proxy.js" },
-    "./plugin":      { "types": "./dist/plugin.d.ts",      "source": "./src/plugin.ts",      "default": "./dist/plugin.js" },
-    "./schemas":     { "types": "./dist/schemas.d.ts",     "source": "./src/schemas.ts",     "default": "./dist/schemas.js" },
-    "./api":         { "types": "./dist/api.d.ts",         "source": "./src/api.ts",         "default": "./dist/api.js" }
+    ".": {
+      "types": "./dist/index.d.ts",
+      "source": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./permissions": {
+      "types": "./dist/permissions.d.ts",
+      "source": "./src/permissions.ts",
+      "default": "./dist/permissions.js"
+    },
+    "./proxy": {
+      "types": "./dist/proxy.d.ts",
+      "source": "./src/proxy.ts",
+      "default": "./dist/proxy.js"
+    },
+    "./list-query": {
+      "types": "./dist/list-query.d.ts",
+      "source": "./src/list-query.ts",
+      "default": "./dist/list-query.js"
+    },
+    "./rls-context": {
+      "types": "./dist/rls-context.d.ts",
+      "source": "./src/rls-context.ts",
+      "default": "./dist/rls-context.js"
+    },
+    "./plugin": {
+      "types": "./dist/plugin.d.ts",
+      "source": "./src/plugin.ts",
+      "default": "./dist/plugin.js"
+    },
+    "./schemas": {
+      "types": "./dist/schemas.d.ts",
+      "source": "./src/schemas.ts",
+      "default": "./dist/schemas.js"
+    },
+    "./api": {
+      "types": "./dist/api.d.ts",
+      "source": "./src/api.ts",
+      "default": "./dist/api.js"
+    },
+    "./migrations": {
+      "types": "./dist/migrations.d.ts",
+      "source": "./src/migrations.ts",
+      "default": "./dist/migrations.js"
+    }
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist", "package.json", "README.md", "CHANGELOG.md", "LICENSE", "NOTICE"],
+  "files": [
+    "dist",
+    "sql",
+    "package.json",
+    "src",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "NOTICE"
+  ],
   "scripts": {
     "build": "tsc",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "check": "tsc --noEmit"
   },
   "publishConfig": {
     "registry": "http://localhost:4873",
@@ -51,8 +99,12 @@
     "pg": ">=8"
   },
   "peerDependenciesMeta": {
-    "fastify": { "optional": true },
-    "pg": { "optional": true }
+    "fastify": {
+      "optional": true
+    },
+    "pg": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/bcryptjs": "^2",
@@ -60,5 +112,6 @@
     "fastify": "^5",
     "pg": "^8",
     "typescript": "^5"
-  }
+  },
+  "license": "Apache-2.0"
 }
