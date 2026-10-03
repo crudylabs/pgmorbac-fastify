@@ -1,28 +1,30 @@
 {
-  "name": "@crudy/pgmorbac",
+  "name": "@crudy/pgmorbac-fastify",
   "version": "1.0.0",
   "type": "module",
-  "description": "Crudy pgmorbac - Multi-OrBAC permission helpers for Fastify and PostgreSQL",
+  "description": "Fastify layer over pgmorbac: permission checks, RLS session context, management routes, PostgREST data proxy, migration loader",
   "keywords": [
-    "morbac",
-    "orbac",
-    "rbac",
-    "authorization",
     "access-control",
-    "postgresql",
+    "authorization",
     "fastify",
-    "rls",
-    "multi-tenant"
+    "morbac",
+    "multi-tenant",
+    "orbac",
+    "pgmorbac",
+    "postgresql",
+    "rbac",
+    "rls"
   ],
   "author": "Marc Villain",
   "homepage": "https://pgmorbac.crudy.fr",
   "repository": {
     "type": "git",
-    "url": "https://github.com/crudylabs/pgmorbac-node.git"
+    "url": "git+https://github.com/crudylabs/pgmorbac-fastify.git"
   },
   "bugs": {
-    "url": "https://github.com/crudylabs/pgmorbac-node/issues"
+    "url": "https://github.com/crudylabs/pgmorbac-fastify/issues"
   },
+  "license": "MIT",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -74,13 +76,11 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
-    "sql",
     "package.json",
     "src",
     "README.md",
     "CHANGELOG.md",
-    "LICENSE",
-    "NOTICE"
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc",
@@ -88,10 +88,10 @@
     "check": "tsc --noEmit"
   },
   "publishConfig": {
-    "registry": "http://localhost:4873",
     "access": "public"
   },
   "dependencies": {
+    "@crudy/pgmorbac": "^1.0.0",
     "bcryptjs": "^2"
   },
   "peerDependencies": {
@@ -112,6 +112,5 @@
     "fastify": "^5",
     "pg": "^8",
     "typescript": "^5"
-  },
-  "license": "Apache-2.0"
+  }
 }

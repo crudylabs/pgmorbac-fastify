@@ -1,18 +1,18 @@
-# @crudy/pgmorbac
+# @crudy/pgmorbac-fastify
 
 **Multi-OrBAC permission helpers for Fastify and PostgreSQL.**
 
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/Node-%3E%3D18-brightgreen.svg)](https://nodejs.org/)
 
-This is the Node.js companion to the [`pgmorbac` PostgreSQL extension](https://github.com/crudylabs/pgmorbac). The extension implements the Multi-OrBAC access control model in the database (`morbac` schema); this package wires it into a Fastify backend: permission checks, RLS session context, management routes, a PostgREST data proxy, and the migration loader that ships the extension SQL.
+This is the Node.js companion to the [`pgmorbac` PostgreSQL extension](https://github.com/crudylabs/pgmorbac). The extension implements the Multi-OrBAC access control model in the database (`morbac` schema); this package wires it into a Fastify backend: permission checks, RLS session context, management routes, a PostgREST data proxy, and the migration loader for the extension SQL from [`@crudy/pgmorbac`](https://www.npmjs.com/package/@crudy/pgmorbac).
 
-> The SQL extension is a separate project under the MIT license. This helper package is Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+> MIT, like the pgmorbac SQL extension it builds on. See [LICENSE](LICENSE).
 
 ## Install
 
 ```bash
-npm install @crudy/pgmorbac
+npm install @crudy/pgmorbac-fastify
 ```
 
 Peer dependencies (both optional, install the ones you use): `fastify >=5`, `pg >=8`.
@@ -23,14 +23,14 @@ The package is split into focused entry points so you only pull in what you need
 
 | Import | Purpose |
 |--------|---------|
-| `@crudy/pgmorbac` | RLS session context and shared domain types |
-| `@crudy/pgmorbac/permissions` | `hasPermission`, org-scope resolution, admin checks |
-| `@crudy/pgmorbac/proxy` | PostgREST data proxy with per-route permissions |
-| `@crudy/pgmorbac/plugin` | Fastify management routes (orgs, roles, rules, users, delegations) |
-| `@crudy/pgmorbac/list-query` | PostgREST-style sort/filter/pagination parsing |
-| `@crudy/pgmorbac/schemas` | JSON schema response fragments |
-| `@crudy/pgmorbac/migrations` | Loads the bundled `morbac` extension SQL as migrations |
-| `@crudy/pgmorbac/api` | Domain type definitions (`Org`, `Role`, `Rule`, ...) |
+| `@crudy/pgmorbac-fastify` | RLS session context and shared domain types |
+| `@crudy/pgmorbac-fastify/permissions` | `hasPermission`, org-scope resolution, admin checks |
+| `@crudy/pgmorbac-fastify/proxy` | PostgREST data proxy with per-route permissions |
+| `@crudy/pgmorbac-fastify/plugin` | Fastify management routes (orgs, roles, rules, users, delegations) |
+| `@crudy/pgmorbac-fastify/list-query` | PostgREST-style sort/filter/pagination parsing |
+| `@crudy/pgmorbac-fastify/schemas` | JSON schema response fragments |
+| `@crudy/pgmorbac-fastify/migrations` | Loads the bundled `morbac` extension SQL as migrations |
+| `@crudy/pgmorbac-fastify/api` | Domain type definitions (`Org`, `Role`, `Rule`, ...) |
 
 ## Usage
 
@@ -39,7 +39,7 @@ The package is split into focused entry points so you only pull in what you need
 Every org-scoped route authorizes with `hasPermission`. Authentication is necessary but not sufficient; the check calls `morbac.is_allowed` and requires an `X-Org-Id` header.
 
 ```ts
-import { hasPermission } from '@crudy/pgmorbac/permissions';
+import { hasPermission } from '@crudy/pgmorbac-fastify/permissions';
 
 app.get('/documents', async (req, reply) => {
   const orgId = req.headers['x-org-id'] as string;
@@ -53,7 +53,7 @@ app.get('/documents', async (req, reply) => {
 Run queries under the acting user so `morbac` row-level security policies apply as a second gate behind `hasPermission`. Required for non-`BYPASSRLS` runtime roles.
 
 ```ts
-import { withMorbacContext } from '@crudy/pgmorbac';
+import { withMorbacContext } from '@crudy/pgmorbac-fastify';
 
 const rows = await withMorbacContext(pool, { userId, orgId }, async (client) => {
   const { rows } = await client.query('SELECT * FROM app.orgs');
@@ -66,7 +66,7 @@ const rows = await withMorbacContext(pool, { userId, orgId }, async (client) => 
 Expose an `app`-schema table through the backend with an explicit permission. A path that is never registered does not exist (fail closed).
 
 ```ts
-import { createProxyRegistry } from '@crudy/pgmorbac/proxy';
+import { createProxyRegistry } from '@crudy/pgmorbac-fastify/proxy';
 
 const proxy = createProxyRegistry(pool, process.env.POSTGREST_URL!);
 proxy.proxyDataRoute(app, 'GET', '/data/documents', 'documents', { activity: 'read', view: 'documents' });
@@ -76,10 +76,10 @@ Pass `null` as the permission for any-authenticated-user access with no org chec
 
 ### Migrations
 
-The extension SQL ships inside this package (`sql/pgmorbac--<version>.sql`, plus `sql/upgrades/`). Feed it to your migration runner before your own DDL.
+`morbacMigrations()` returns the extension SQL from `@crudy/pgmorbac` (install script plus upgrade scripts) ready for your migration runner. Feed it before your own DDL.
 
 ```ts
-import { morbacMigrations } from '@crudy/pgmorbac/migrations';
+import { morbacMigrations } from '@crudy/pgmorbac-fastify/migrations';
 
 for (const { filename, sql } of morbacMigrations()) {
   await runMigration(filename, sql);
@@ -93,7 +93,7 @@ The base script keeps the historical filename `0001_morbac.sql` so `schema_migra
 Register CRUD routes for orgs, roles, rules, users, global rules, activities, and delegations. Supply optional hooks for license-limit enforcement and event emission.
 
 ```ts
-import { createMgmtRoutes } from '@crudy/pgmorbac/plugin';
+import { createMgmtRoutes } from '@crudy/pgmorbac-fastify/plugin';
 
 createMgmtRoutes({
   db: pool,
@@ -116,4 +116,4 @@ createMgmtRoutes({
 
 ## License
 
-Apache-2.0 (c) 2025-2026 Marc Villain. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+MIT (c) 2025-2026 Marc Villain. See [LICENSE](LICENSE).

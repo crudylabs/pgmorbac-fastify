@@ -1,40 +1,28 @@
-import { readFileSync, readdirSync, existsSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-
-const sqlDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'sql');
+import { extensionSql, upgradeScripts, version } from '@crudy/pgmorbac';
 
 export interface MorbacMigration {
     filename: string;
     sql: string;
 }
 
-// The morbac schema ships with this package as a PGXN-style extension script
-// (sql/pgmorbac--<version>.sql) plus upgrade scripts (sql/upgrades/). For the
-// crudy migration runner they are exposed as plain migrations: the base script
-// keeps the historical filename 0001_morbac.sql so schema_migrations rows on
-// existing databases stay valid, and upgrade scripts follow in version order
-// as 0001_morbac--<old>--<new>.sql.
+// The pgmorbac install and upgrade scripts (from @crudy/pgmorbac) as plain
+// migrations for a migration runner. Without CREATE EXTENSION the morbac schema is
+// created up front, and the installed version is recorded. The base keeps the
+// historical filename 0001_morbac.sql so schema_migrations rows on existing
+// databases stay valid; its bytes must not change for an unchanged extension
+// version, or boot re-runs it. Upgrades follow as 0001_morbac--<old>--<new>.sql.
 export function morbacMigrations(): MorbacMigration[] {
-    const base = readdirSync(sqlDir)
-        .filter(f => /^pgmorbac--\d+\.\d+\.\d+\.sql$/.test(f))
-        .sort();
-    if (base.length !== 1) {
-        throw new Error(`[pgmorbac] Expected exactly one base script in ${sqlDir}, found ${base.length}`);
-    }
-    const migrations: MorbacMigration[] = [{
-        filename: '0001_morbac.sql',
-        sql: readFileSync(join(sqlDir, base[0]), 'utf8'),
-    }];
-
-    const upgradesDir = join(sqlDir, 'upgrades');
-    if (existsSync(upgradesDir)) {
-        for (const f of readdirSync(upgradesDir).filter(n => n.endsWith('.sql')).sort()) {
-            migrations.push({
-                filename: `0001_morbac${f.replace(/^pgmorbac/, '').replace(/\.sql$/, '')}.sql`,
-                sql: readFileSync(join(upgradesDir, f), 'utf8'),
-            });
-        }
-    }
-    return migrations;
+    const lines = extensionSql().split('\n');
+    lines.splice(lines.indexOf('') + 1, 0, 'CREATE SCHEMA IF NOT EXISTS morbac;');
+    const sql = lines.join('\n') + `
+-- Record the installed schema version (readable via
+-- morbac.get_config('schema_version'); upgrade scripts bump it).
+INSERT INTO morbac.config (key, value, description)
+VALUES ('schema_version', '${version}', 'Installed pgmorbac schema version')
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP;
+`;
+    return [
+        { filename: '0001_morbac.sql', sql },
+        ...upgradeScripts().map(u => ({ filename: `0001_morbac--${u.from}--${u.to}.sql`, sql: u.sql })),
+    ];
 }

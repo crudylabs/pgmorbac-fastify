@@ -243,7 +243,10 @@ export interface MorbacApi {
     revokeDelegation(token: string, orgIds: string[], id: string): Promise<null>;
 }
 
-export function createMorbacApi(apiUrl: string): MorbacApi {
+// apiUrl may be a function so a browser caller resolves the origin per request
+// rather than when its module loads.
+export function createMorbacApi(apiUrl: string | (() => string)): MorbacApi {
+    const base = typeof apiUrl === 'function' ? apiUrl : () => apiUrl;
     async function api(method: string, path: string, token: string, orgIds: string[], body?: unknown): Promise<unknown> {
         const headers: Record<string, string> = {
             Authorization: `Bearer ${token}`,
@@ -254,7 +257,7 @@ export function createMorbacApi(apiUrl: string): MorbacApi {
             headers['X-Org-Ids'] = orgIds.join(',');
         }
         if (body !== undefined) headers['Content-Type'] = 'application/json';
-        const res = await fetch(`${apiUrl}${path}`, {
+        const res = await fetch(`${base()}${path}`, {
             method,
             headers,
             credentials: 'include',
@@ -279,7 +282,7 @@ export function createMorbacApi(apiUrl: string): MorbacApi {
     const PERM_TTL_MS = 30_000;
 
     async function fetchPermission(token: string, orgId: string, activity: string, view: string): Promise<boolean> {
-        const res = await fetch(`${apiUrl}/me/permissions/check`, {
+        const res = await fetch(`${base()}/me/permissions/check`, {
             method: 'POST',
             headers: {
                 Authorization: `Bearer ${token}`,
