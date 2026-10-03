@@ -28,47 +28,38 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "source": "./src/index.ts",
       "default": "./dist/index.js"
     },
     "./permissions": {
       "types": "./dist/permissions.d.ts",
-      "source": "./src/permissions.ts",
       "default": "./dist/permissions.js"
     },
     "./proxy": {
       "types": "./dist/proxy.d.ts",
-      "source": "./src/proxy.ts",
       "default": "./dist/proxy.js"
     },
     "./list-query": {
       "types": "./dist/list-query.d.ts",
-      "source": "./src/list-query.ts",
       "default": "./dist/list-query.js"
     },
     "./rls-context": {
       "types": "./dist/rls-context.d.ts",
-      "source": "./src/rls-context.ts",
       "default": "./dist/rls-context.js"
     },
     "./plugin": {
       "types": "./dist/plugin.d.ts",
-      "source": "./src/plugin.ts",
       "default": "./dist/plugin.js"
     },
     "./schemas": {
       "types": "./dist/schemas.d.ts",
-      "source": "./src/schemas.ts",
       "default": "./dist/schemas.js"
     },
     "./api": {
       "types": "./dist/api.d.ts",
-      "source": "./src/api.ts",
       "default": "./dist/api.js"
     },
     "./migrations": {
       "types": "./dist/migrations.d.ts",
-      "source": "./src/migrations.ts",
       "default": "./dist/migrations.js"
     }
   },
