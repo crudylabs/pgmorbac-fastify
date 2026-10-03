@@ -22,4 +22,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `withMorbacContext` accepts an org selection, serialised to `morbac.org_ids`
   where a JSON null element names the unattributed bucket.
 
-[1.0.0]: https://git.villains.fr/crudy/pgmorbac-node/releases/tag/v1.0.0
+[1.0.0]: https://github.com/crudylabs/pgmorbac-fastify/releases/tag/v1.0.0
