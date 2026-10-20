@@ -1,0 +1,49 @@
+# Publishes @crudy/pgmorbac-fastify to npmjs on version tags (v<major>.<minor>.<patch>)
+# through npm trusted publishing: GitHub's OIDC token stands in for an npm
+# token, and npm attaches a provenance statement naming this repository and
+# commit. The organisation only allows its own actions, so checkout and Node
+# setup are plain shell. prepack builds dist from src.
+name: publish
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      NODE_VERSION: v24.12.0
+    steps:
+      - name: Check out the tag
+        run: |
+          case "$GITHUB_REF_NAME" in v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "not a version tag: $GITHUB_REF_NAME" >&2; exit 1 ;; esac
+          git init -q .
+          git fetch -q --depth 1 "https://github.com/$GITHUB_REPOSITORY" "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          git checkout -q "refs/tags/$GITHUB_REF_NAME"
+      - name: Install Node
+        run: |
+          base="https://nodejs.org/dist/$NODE_VERSION"
+          file="node-$NODE_VERSION-linux-x64.tar.xz"
+          curl -fsSLO "$base/$file"
+          curl -fsSL "$base/SHASUMS256.txt" | grep " $file\$" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/node"
+          tar -xJf "$file" -C "$RUNNER_TEMP/node" --strip-components=1
+          rm "$file"
+          echo "$RUNNER_TEMP/node/bin" >> "$GITHUB_PATH"
+      - run: npm install --no-audit --no-fund
+      - run: npm run check
+      - name: Publish
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          [ "v$VERSION" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME does not match package version $VERSION" >&2; exit 1; }
+          NAME=$(node -p "require('./package.json').name")
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "$NAME@$VERSION is already published"
+          else
+            npm publish --access public
+          fi
