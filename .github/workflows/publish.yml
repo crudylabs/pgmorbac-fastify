@@ -1,8 +1,10 @@
-# Publishes @crudy/pgmorbac-fastify to npmjs on version tags (v<major>.<minor>.<patch>)
+# Stages @crudy/pgmorbac-fastify to npmjs on version tags (v<major>.<minor>.<patch>)
 # through npm trusted publishing: GitHub's OIDC token stands in for an npm
 # token, and npm attaches a provenance statement naming this repository and
-# commit. The organisation only allows its own actions, so checkout and Node
-# setup are plain shell. prepack builds dist from src.
+# commit. The trusted publisher may only stage: a staged version goes live once
+# a maintainer approves it with 2FA (npm stage approve, or npmjs.com). The
+# organisation only allows its own actions, so checkout and Node setup are
+# plain shell. prepack builds dist from src.
 name: publish
 
 on:
@@ -35,6 +37,8 @@ jobs:
           tar -xJf "$file" -C "$RUNNER_TEMP/node" --strip-components=1
           rm "$file"
           echo "$RUNNER_TEMP/node/bin" >> "$GITHUB_PATH"
+      - name: Install npm with staged publishing
+        run: npm install -g npm@11.21.1
       - run: npm install --no-audit --no-fund
       - run: npm run check
       - name: Publish
@@ -45,5 +49,5 @@ jobs:
           if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
             echo "$NAME@$VERSION is already published"
           else
-            npm publish --access public
+            npm stage publish
           fi
