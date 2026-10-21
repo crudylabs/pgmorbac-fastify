@@ -1,6 +1,6 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import type { Pool } from 'pg';
-import { hasPermission, hasPermissionAny } from './permissions.js';
+import { checkApiKeyScope, hasPermission, permittedOrgs, UNATTRIBUTED_ORG_TOKEN } from './permissions.js';
 
 export interface DataPermission {
     activity: string;
@@ -95,13 +95,17 @@ export function createProxyRegistry(db: Pool, postgrestUrl: string): ProxyRegist
                         return reply;
                     }
                 } else if (orgIdsVal && orgIdsVal.trim()) {
-                    // A multi-org list read (e.g. "all organizations"): scoped to the
-                    // set via X-Org-Ids. RLS filters each row, so the gate only needs
-                    // permission in one of them.
+                    // A multi-org list read (e.g. "all organizations"). Only the orgs
+                    // where the caller is allowed go upstream: RLS filters rows by
+                    // morbac alone, so an org a permission hook refused would
+                    // otherwise still show its rows.
+                    if (!checkApiKeyScope(req, reply, permission.activity, permission.view)) return reply;
                     const ids = orgIdsVal.split(',').map(s => s.trim()).filter(Boolean);
-                    if (!await hasPermissionAny(db, req, reply, ids, permission.activity, permission.view)) {
-                        return reply;
-                    }
+                    const unattributed = ids.some((id) => id.toLowerCase() === UNATTRIBUTED_ORG_TOKEN);
+                    const real = ids.filter((id) => id.toLowerCase() !== UNATTRIBUTED_ORG_TOKEN);
+                    const allowed = await permittedOrgs(db, user.id, real, permission.activity, permission.view, req);
+                    if (allowed.length === 0) return reply.code(403).send({ error: 'Insufficient permissions' });
+                    req.headers['x-org-ids'] = (unattributed ? [...allowed, UNATTRIBUTED_ORG_TOKEN] : allowed).join(',');
                 } else {
                     return reply.code(400).send({ error: 'X-Org-Id header is required' });
                 }

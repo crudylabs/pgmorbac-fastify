@@ -6,9 +6,12 @@ export {
     orgSelectionToSetting,
     orgTargetsToHeader,
     hasAnyPermission,
+    isAllowed,
+    permittedOrgs,
     type OrgTarget,
     type OrgSelection,
 } from './permissions.js';
+export { addPermissionHook, type PermissionCheck, type PrePermissionHook, type PostPermissionHook } from './permission-hooks.js';
 export type { DataPermission } from './proxy.js';
 export type {
     Org,

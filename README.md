@@ -24,7 +24,7 @@ The package is split into focused entry points so you only pull in what you need
 | Import | Purpose |
 |--------|---------|
 | `@crudy/pgmorbac-fastify` | RLS session context and shared domain types |
-| `@crudy/pgmorbac-fastify/permissions` | `hasPermission`, org-scope resolution, admin checks |
+| `@crudy/pgmorbac-fastify/permissions` | `hasPermission`, `isAllowed`, `permittedOrgs`, permission hooks, org-scope resolution, admin checks |
 | `@crudy/pgmorbac-fastify/proxy` | PostgREST data proxy with per-route permissions |
 | `@crudy/pgmorbac-fastify/plugin` | Fastify management routes (orgs, roles, rules, users, delegations) |
 | `@crudy/pgmorbac-fastify/list-query` | PostgREST-style sort/filter/pagination parsing |
@@ -47,6 +47,21 @@ app.get('/documents', async (req, reply) => {
   // ... authorized: read and return rows
 });
 ```
+
+For a decision without a reply, use `isAllowed(pool, userId, orgId, activity, view)`; for several orgs at once, `permittedOrgs`. Never query `morbac.is_allowed` directly: it skips the hooks below.
+
+### Permission hooks
+
+An application adds its own rules to every decision with `addPermissionHook`. A `pre` hook runs before morbac is asked and a `post` hook receives morbac's answer. Either can only refuse: a decision is allowed when morbac allows it and every hook returns `true`. A hook that throws fails the decision with its error.
+
+```ts
+import { addPermissionHook } from '@crudy/pgmorbac-fastify/permissions';
+
+// No action in an org whose subscription lapsed.
+addPermissionHook('pre', async ({ orgId }) => orgId === null || await subscriptionActive(orgId));
+```
+
+The hooks run in `hasPermission`, `hasPermissionAny`, `canPerform`, `canActOnUser`, `canGrantRule`, `isAllowed`, `permittedOrgs` and the data proxy, which forwards only the `X-Org-Ids` the caller is allowed in. `hasAnyPermission` names no org and runs none. Row-level security evaluates morbac alone, so a rule that must also hide rows belongs in the database.
 
 ### RLS session context
 
@@ -107,6 +122,7 @@ createMgmtRoutes({
 - **Deny by default.** Unregistered routes do not exist; unauthorized reads return `404` over `403` to avoid enumeration.
 - **Reads are checked too.** List and detail routes require the same permission checks as writes.
 - **Two gates stacked.** `hasPermission` (application) plus `morbac` RLS (database) when running under a non-`BYPASSRLS` role.
+- **Hooks only narrow.** An application rule added with `addPermissionHook` can refuse a decision morbac allowed, never allow one it refused.
 - **Allowlisted queries.** `list-query` parameterizes values and allowlists sortable/filterable columns; user input is never interpolated.
 
 ## Related

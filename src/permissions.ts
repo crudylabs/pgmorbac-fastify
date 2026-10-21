@@ -1,5 +1,8 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import type { Pool } from 'pg';
+import { runPostHooks, runPreHooks } from './permission-hooks.js';
+
+export { addPermissionHook, type PermissionCheck, type PrePermissionHook, type PostPermissionHook } from './permission-hooks.js';
 
 export const SYSTEM_ORG_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -122,18 +125,12 @@ export async function canActOnUser(
     activity: string,
     view: string,
 ): Promise<boolean> {
-    const { rows } = await db.query<{ ok: boolean }>(
-        `SELECT (
-             morbac.is_allowed($1::UUID, NULL::UUID, $3, $4)
-             OR EXISTS (
-                 SELECT 1 FROM morbac.user_roles ur
-                 WHERE ur.user_id = $2::UUID
-                   AND morbac.is_allowed($1::UUID, ur.org_id, $3, $4)
-             )
-         ) AS ok`,
-        [callerId, targetUserId, activity, view],
+    if (await isAllowed(db, callerId, null, activity, view)) return true;
+    const { rows } = await db.query<{ org_id: string }>(
+        'SELECT DISTINCT org_id FROM morbac.user_roles WHERE user_id = $1::UUID',
+        [targetUserId],
     );
-    return rows[0]?.ok ?? false;
+    return (await permittedOrgs(db, callerId, rows.map((r) => r.org_id), activity, view)).length > 0;
 }
 
 /** True if the caller may reach org (activity, view) at every org that a rule
@@ -153,20 +150,14 @@ export async function canGrantRule(
     activity: string,
     view: string,
 ): Promise<boolean> {
-    const { rows } = await db.query<{ ok: boolean }>(
-        `SELECT (
-             NOT EXISTS (
-                 SELECT 1 FROM morbac.get_org_scope($2::UUID, $3) AS s(org_id)
-                 WHERE NOT morbac.is_allowed($1::UUID, s.org_id, $4, $5)
-             )
-             AND (
-                 $3 NOT IN ('unattributed', 'all')
-                 OR morbac.is_allowed($1::UUID, NULL::UUID, $4, $5)
-             )
-         ) AS ok`,
-        [callerId, ruleOrgId, scope, activity, view],
+    const { rows } = await db.query<{ org_id: string }>(
+        'SELECT org_id FROM morbac.get_org_scope($1::UUID, $2) AS s(org_id)',
+        [ruleOrgId, scope],
     );
-    return rows[0]?.ok ?? false;
+    const covered = rows.map((r) => r.org_id);
+    if ((await permittedOrgs(db, callerId, covered, activity, view)).length !== covered.length) return false;
+    if (scope !== 'unattributed' && scope !== 'all') return true;
+    return isAllowed(db, callerId, null, activity, view);
 }
 
 /** True iff (activity, view) has an explicit row in morbac.activity_view_bindings.
@@ -211,7 +202,8 @@ export async function requireGlobalAdmin(db: Pool, req: FastifyRequest, reply: F
 
 /** True if the user may perform (activity, view) in ANY context: any org they
  *  belong to, unattributed objects, or via a global rule. For deciding whether
- *  to expose a feature at all -- never a substitute for the per-object check. */
+ *  to expose a feature at all -- never a substitute for the per-object check.
+ *  Names no org, so permission hooks do not run. */
 export async function hasAnyPermission(
     db: Pool,
     userId: string,
@@ -245,11 +237,7 @@ export async function canPerform(
     if (!user) return false;
     const apiKeyScope = ((req as unknown) as Record<string, unknown>).apiKeyScope as ApiKeyScope | undefined;
     if (!scopeAllows(apiKeyScope, activity, target)) return false;
-    const { rows } = await db.query<{ allowed: boolean }>(
-        'SELECT morbac.is_allowed($1::UUID, $2::UUID, $3, $4) AS allowed',
-        [user.id, orgId, activity, target],
-    );
-    return rows[0]?.allowed === true;
+    return isAllowed(db, user.id, orgId, activity, target, req);
 }
 
 /** Reads an API key's scope off a request, for callers that must reason about it. */
@@ -277,11 +265,7 @@ export async function hasPermission(
         reply.code(403).send({ error: 'Insufficient permissions' });
         return false;
     }
-    const { rows } = await db.query<{ allowed: boolean }>(
-        'SELECT morbac.is_allowed($1::UUID, $2::UUID, $3, $4) AS allowed',
-        [user.id, orgId, activity, target],
-    );
-    if (!rows[0]?.allowed) {
+    if (!await isAllowed(db, user.id, orgId, activity, target, req)) {
         reply.code(403).send({ error: 'Insufficient permissions' });
         return false;
     }
@@ -312,15 +296,58 @@ export async function hasPermissionAny(
         reply.code(403).send({ error: 'Insufficient permissions' });
         return false;
     }
-    const real = orgIds.filter((v) => v && v.toLowerCase() !== 'unattributed');
-    const { rows } = await db.query<{ allowed: boolean }>(
-        `SELECT bool_or(morbac.is_allowed($1::UUID, o::UUID, $3, $4)) AS allowed
-           FROM unnest($2::UUID[]) o`,
-        [user.id, real, activity, target],
-    );
-    if (!rows[0]?.allowed) {
+    const real = orgIds.filter((v) => v && v.toLowerCase() !== UNATTRIBUTED_ORG_TOKEN);
+    if ((await permittedOrgs(db, user.id, real, activity, target, req)).length === 0) {
         reply.code(403).send({ error: 'Insufficient permissions' });
         return false;
     }
     return true;
+}
+
+/**
+ * The one permission decision every helper makes: morbac's answer, narrowed by
+ * the application's permission hooks (`addPermissionHook`). Use it instead of
+ * querying `morbac.is_allowed` directly, which would skip those hooks.
+ */
+export async function isAllowed(
+    db: Pool,
+    userId: string,
+    orgId: string | null,
+    activity: string,
+    view: string,
+    req?: FastifyRequest,
+): Promise<boolean> {
+    const check = { userId, orgId, activity, view, req };
+    if (!await runPreHooks(check, db)) return false;
+    const { rows } = await db.query<{ allowed: boolean }>(
+        'SELECT morbac.is_allowed($1::UUID, $2::UUID, $3, $4) AS allowed',
+        [userId, orgId, activity, view],
+    );
+    return runPostHooks(check, rows[0]?.allowed === true, db);
+}
+
+/** The orgs among `orgIds` where `isAllowed` would answer yes, in their given order, asked of morbac in one query. */
+export async function permittedOrgs(
+    db: Pool,
+    userId: string,
+    orgIds: string[],
+    activity: string,
+    view: string,
+    req?: FastifyRequest,
+): Promise<string[]> {
+    const candidates: string[] = [];
+    for (const orgId of new Set(orgIds)) {
+        if (await runPreHooks({ userId, orgId, activity, view, req }, db)) candidates.push(orgId);
+    }
+    if (candidates.length === 0) return [];
+    const { rows } = await db.query<{ o: string }>(
+        'SELECT o FROM unnest($2::UUID[]) o WHERE morbac.is_allowed($1::UUID, o, $3, $4)',
+        [userId, candidates, activity, view],
+    );
+    const allowed = new Set(rows.map((r) => r.o.toLowerCase()));
+    const out: string[] = [];
+    for (const orgId of candidates) {
+        if (await runPostHooks({ userId, orgId, activity, view, req }, allowed.has(orgId.toLowerCase()), db)) out.push(orgId);
+    }
+    return out;
 }

@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 import type { CheckLimitFn } from '../plugin.js';
 import {
     getUser, getOrgScope, orgScopeExpr, hasPermission, canActOnUser, checkApiKeyScope,
-    getAccountType, viewForType, SYSTEM_ORG_ID,
+    getAccountType, viewForType, isAllowed, SYSTEM_ORG_ID,
 } from '../permissions.js';
 import { userResponse, notFound, forbidden, unauthorized, badRequest } from '../schemas.js';
 import { generatePassword } from '../password.js';
@@ -37,17 +37,11 @@ export function createUserCrudRoutes(db: Pool, checkLimit?: CheckLimitFn) {
             // no-org perimeter (a NULL org), not a claim about every org. Any
             // grant that reaches it answers: a role rule scoped unattributed or
             // all, a user rule with no org, or a global rule.
-            const [sysRes, svcRes, noOrgRes] = await Promise.all([
-                db.query<{ allowed: boolean }>('SELECT morbac.is_allowed($1::UUID, $2::UUID, $3, $4) AS allowed',
-                    [user.id, checkOrg, 'read', 'system_users']),
-                db.query<{ allowed: boolean }>('SELECT morbac.is_allowed($1::UUID, $2::UUID, $3, $4) AS allowed',
-                    [user.id, checkOrg, 'read', 'service_users']),
-                db.query<{ allowed: boolean }>('SELECT morbac.is_allowed($1::UUID, NULL, $2, $3) AS allowed',
-                    [user.id, 'read', 'users']),
+            const [canSeeSystem, canSeeService, canReadUnattached] = await Promise.all([
+                isAllowed(db, user.id, checkOrg, 'read', 'system_users', req),
+                isAllowed(db, user.id, checkOrg, 'read', 'service_users', req),
+                isAllowed(db, user.id, null, 'read', 'users', req),
             ]);
-            const canSeeSystem      = sysRes.rows[0]?.allowed   ?? false;
-            const canSeeService     = svcRes.rows[0]?.allowed   ?? false;
-            const canReadUnattached = noOrgRes.rows[0]?.allowed ?? false;
 
             const { expr, params } = orgScopeExpr(orgIds, 'ur2.org_id');
             const isSystemScope = orgIds.includes(SYSTEM_ORG_ID);

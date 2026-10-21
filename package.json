@@ -1,6 +1,6 @@
 {
   "name": "@crudy/pgmorbac-fastify",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "description": "Fastify layer over pgmorbac: permission checks, RLS session context, management routes, PostgREST data proxy, migration loader",
   "keywords": [
@@ -76,7 +76,8 @@
   "scripts": {
     "build": "tsc",
     "prepack": "npm run build",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "tsc && node --test 'test/*.test.mjs'"
   },
   "publishConfig": {
     "access": "public"

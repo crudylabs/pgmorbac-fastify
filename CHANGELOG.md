@@ -5,6 +5,16 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-10-21
+
+### Added
+- `addPermissionHook('pre' | 'post', hook)`: application rules every permission decision runs. Hooks can only refuse; a throwing hook fails the decision.
+- `isAllowed` and `permittedOrgs`: the hooked decision without a reply, for one org or several.
+
+### Changed
+- `hasPermission`, `hasPermissionAny`, `canPerform`, `canActOnUser`, `canGrantRule`, the user listing and role assignment decide through `isAllowed`, so hooks apply to each.
+- The data proxy forwards only the `X-Org-Ids` the caller is allowed in, instead of every listed org once one passed. Rows are unchanged without hooks: RLS already hid the others.
+
 ## [1.0.0] - 2026-07-25
 
 ### Added
